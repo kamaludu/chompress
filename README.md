@@ -1,26 +1,30 @@
 [![Compressore locale LLM‑ready](https://img.shields.io/badge/Compressore_locale_LLM‑ready-00aa55?style=for-the-badge&label=>&labelColor=004d00)](README.md)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-green.svg)](LICENSE)
-[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/Django?style=flat)](#)
+[![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](#)
 
 # Compressore locale LLM‑ready  
-Compressione reversibile per testo, ottimizzata per LLM (placeholder + manifest + chunking + roundtrip verificabile)
+Compressione reversibile di testo e codice sorgente, ottimizzata per l'invio a Large Language Models (placeholder semantici + mapping compatto + chunking boundary-aware + verifica roundtrip esatta).
 
 > [!IMPORTANT]  
-> Questo programma opera in modalità ***lossy*** per impostazione predefinita: i file compressi non sono destinati alla ricostruzione locale, ma all’uso diretto in un LLM, dove la riduzione dei token ha priorità sulla fedeltà byte‑per‑byte.
+> **Comportamento predefinito sul testo:**  
+> Per massimizzare il risparmio di token, il programma rimuove per impostazione predefinita le righe vuote nei file di codice sorgente e dati (mantenendole intatte per la documentazione `.md`, `.txt`, `.rst`, `.html`).  
+> Se hai bisogno di una compressione al 100% identica al byte su tutti i file (modalità lossless pura), aggiungi semplicemente il flag `--keep-empty-lines`.
 
 ---
 
-## 1. Clona il progetto
+## 1. Installazione e Requisiti
+
+- **Python 3.8+**
+- **Nessuna dipendenza o libreria esterna da installare** (funziona con la sola libreria standard di Python).
+
+Per clonare il repository:
 ```sh
 git clone --depth 1 --branch main https://github.com/kamaludu/chunk-compress.git chunk-compress
+cd chunk-compress
 ```
 
----
-
-## 2. Struttura del progetto
-Assicurati che questi file siano nella stessa directory:
-
-```
+Assicurati che i seguenti file siano presenti nella cartella di lavoro:
+```text
 core.py
 cli.py
 io_utils.py
@@ -28,321 +32,212 @@ io_utils.py
 
 ---
 
-## 3. Requisiti
-- Python 3.8+
-- Nessuna libreria esterna
-- Funziona su qualsiasi shell con Python disponibile
+## 2. Preparazione dell'Input
 
----
+Il programma accetta due tipi di sorgente tramite il parametro `--input` (o `-i`):
 
-## 4. Preparazione input
-Puoi fornire:
-
-**A) Una directory**  
-Esempio:
-```
-/home/user/progetto/
-```
-
-**B) Una file‑lista**  
-Un file di testo con un percorso per riga:
-```
-src/a.py
-src/b.py
-docs/readme.md
-```
-
----
-
-## 5. Esecuzione base
+**A) Una directory di progetto**  
+Elabora ricorsivamente tutti i file testuali contenuti nella cartella:
 ```sh
-python3 cli.py --input <percorso_input> --output out
+--input /percorso/del/tuo/progetto/
 ```
 
-Se non specifichi `--output`, verrà usata automaticamente:
+**B) Un file-lista**  
+Un semplice file di testo che elenca un percorso per riga:
+```text
+src/database.py
+src/api/routes.py
+docs/architecture.md
+```
 
-```
-./compressed_output/
-```
+I file binari (immagini, archivi compressi, eseguibili, database SQLite) vengono esclusi automaticamente dalla scansione per sicurezza e rapidità.
 
 ---
 
-## 6. Parametri principali
-- `--L_min` lunghezza minima substring (default 64)
-- `--N_min` occorrenze minime (default 2)
-- `--B_min_lines` righe minime per blocchi (default 5)
-- `--B_max_lines` righe massime per blocchi (default 20)
-- `--verify-roundtrip` verifica integrità totale
+## 3. Esecuzione Rapida
 
-Esempio:
+### Compressione base con salvataggio in `out/`:
 ```sh
-python3 cli.py --input ./src --output ./out --L_min 80 --verify-roundtrip
+python3 cli.py --input ./mio_progetto --output out
+```
+
+Se non specifichi `--output`, i file verranno salvati automaticamente in `./compressed_output/`.
+
+### Compressione consigliata con verifica di integrità e stima token:
+```sh
+python3 cli.py -i ./mio_progetto -o out --verify-roundtrip
 ```
 
 ---
 
-## 7. Output generati
-Dentro la directory `out/` troverai:
+## 4. File e Directory di Output
 
-**1) File compressi LLM‑ready**
-Stessa struttura dei file originali, ma con placeholder:
+All'interno della cartella di output specificata troverai:
 
-```
-§§s001§§   (substring)
-§§b001§§   (block)
-```
-
-**2) mapping_subset.json**
-Contiene **solo i placeholder effettivamente usati nei file compressi**.
-
-- È generato **automaticamente per tutti i file processati**.
-- È pensato per essere incollato in una chat LLM.
-- È molto più piccolo di `reverse_map.json`.
-
-Puoi controllarne la generazione con:
-
-- `--no-export-mapping` → **nessun mapping_subset.json**
-- `--no-export-mapping file1,file2,...` → esclude solo quei file
-
-**3) reverse_map.json**
-Contiene il mapping **completo**:
-
-- placeholder → contenuto originale
-- posizioni originali
-- metadati
-
-È utile per verifiche locali, ma **troppo grande per essere incollato in una chat**.
-
-**4) manifest.json** (solo se `--export-manifest`)
-Manifest compatto della struttura originale:
-
-- paths
-- files
-- placeholder usati
-- versioning
-
-**5) chunks/** (solo se `--chunk-output`)
-Contiene:
-
-```
-chunks/
-  chunk_0001.txt
-  chunk_0002.txt
-  ...
-  manifest.json   ← manifest dei chunk
-```
-
-Il `chunks/manifest.json` descrive:
-
-- quali chunk compongono ogni file
-- ordine dei chunk
-- SHA256 atteso (se presente)
-
----
-
-## 8. Struttura completa della directory di output
-
-Esempio tipico dopo l’esecuzione:
-
-```
+```text
 out/
-  src/
-    a.py
-    b.py
-  reverse_map.json
-  mapping_subset.json
-  manifest.json          (solo se --export-manifest)
-  chunks/                (solo se --chunk-output)
-    chunk_0001.txt
-    chunk_0002.txt
-    ...
-    manifest.json        (manifest dei chunk)
+  mio_progetto/
+    src/
+      database.py         <- File compresso (con placeholder)
+      api/routes.py       <- File compresso (con placeholder)
+    docs/
+      architecture.md     <- File documentazione preservato
+  mapping_subset.json     <- Vocabolario ridotto da incollare nella chat LLM
+  reverse_map.json        <- Registro completo per ripristino o verifiche locali
+  manifest.json           <- (Opzionale) Mappa globale delle firme e dei file
+  chunks/                 <- (Opzionale) Cartella con file suddivisi in porzioni
+    mio_progetto/
+      src/
+        database.py/
+          0001.txt        <- Primo chunk del file
+          0002.txt        <- Secondo chunk del file
+    manifest.json         <- Manifest per riassemblare i chunk
 ```
 
----
+### Dettaglio dei file generati:
 
-## 9. Come usare gli output in una chat LLM
+1. **File compressi LLM-ready**:  
+   Mantengono l'esatta struttura ad albero del tuo progetto. Le porzioni ripetute sono sostituite da placeholder leggibili:
+   - `§§s001§§` per sequenze e sottostringhe ripetute.
+   - `§§b001§§` per interi blocchi multi-riga (funzioni, intestazioni, classi).
 
-**Caso A — File piccoli (senza chunking)**
-1. Apri `out/`
-2. Copia i file compressi (sono molto più piccoli)
-3. Incollali nella chat LLM
-4. Incolla anche `mapping_subset.json`  
-   → contiene solo i placeholder effettivamente usati  
-5. Chiedi al modello di ricostruire i file usando mapping + file compressi
+2. **`mapping_subset.json`**:  
+   È il file fondamentale per il tuo prompt. Contiene **esclusivamente i placeholder effettivamente usati**, associati al loro testo originale. È studiato per occupare il minor numero possibile di token quando viene incollato nel prompt.
 
-**Caso B — File grandi (con chunking)**
-1. Apri `out/chunks/`
-2. Copia:
-   - `chunks/manifest.json`
-   - tutti i chunk `chunk_*.txt`
-   - `mapping_subset.json`
-3. Incollali nella chat LLM seguendo la sequenza:
-   - manifest dei chunk
-   - mapping
-   - chunk (uno o più per messaggio)
-4. Chiedi al modello di ricostruire i file concatenando i chunk nell’ordine indicato
+3. **`reverse_map.json`**:  
+   Contiene il database completo di tutti i placeholder, comprensivo di offset originali, tipi e frequenze. È utile per ispezione locale, ma solitamente troppo esteso da incollare direttamente in chat.
+
+4. **`chunks/`** (se attivo `--chunk-output`):  
+   Se hai file di decine di migliaia di righe che superano la finestra di contesto del tuo LLM, questo flag li suddivide in porzioni sicure (`0001.txt`, `0002.txt`).  
+   **Protezione boundary-aware:** Il sistema garantisce che nessun placeholder (es. `§§s001§§`) venga mai tagliato a metà e arretra preferenzialmente sui ritorni a capo (`\n`) per mantenere integro il codice.
 
 ---
 
-## 10. Flusso tipico (senza chunking)
-1. Metti i tuoi file in una directory  
-2. Lancia il comando  
-3. Ottieni file compressi  
-4. Incolla in chat LLM  
-5. Risparmi token e mantieni reversibilità totale
+## 5. Report a Terminale e Calcolo Risparmio
+
+Al termine dell'esecuzione, il programma stampa a terminale il consuntivo del risparmio:
+
+```text
+=== SAVINGS AND TOKEN REPORT ===
+Original characters:               125040
+Compressed characters:              78210
+Mapping subset overhead (chars):     6120
+Gross character savings:            46830 (37.45%)
+Net character savings:              40710 (32.56%)
+Estimated original tokens (LLM):    31260
+Estimated compressed text tokens:   19553
+Estimated mapping prompt tokens:     1530
+Estimated net token savings (LLM):  10177
+Active replacements:                   18
+================================
+```
+
+* **Risparmio Lordo (Gross):** Caratteri risparmiati all'interno dei soli file sorgente.
+* **Risparmio Netto Reale (Net):** Risparmio effettivo calcolato sottraendo la dimensione di `mapping_subset.json`. Se questo valore è positivo, stai inviando meno token all'LLM a parità di informazione trasmessa.
+* **Stima Token:** Calcolata sul rapporto empirico medio di 4 caratteri per token `(caratteri / 4.0)`.
 
 ---
 
-## 11. Flusso tipico (con chunking)
-1. Metti i tuoi file in una directory  
-2. Lancia:
+## 6. Come Utilizzare gli Output con un LLM
+
+### Scenario A — File di dimensioni standard (Senza Chunking)
+1. Esegui la compressione standard:
    ```sh
-   python3 cli.py --input ./src --chunk-output
+   python3 cli.py -i ./progetto -o out --verify-roundtrip
    ```
-3. Ottieni:
-   - file compressi normali
-   - chunk in `out/chunks/`
-4. In chat LLM:
-   - incolla `chunks/manifest.json`
-   - incolla `mapping_subset.json`
-   - incolla i chunk
-5. Chiedi la ricostruzione
+2. Nella chat del modello linguistico, incolla:
+   - I file compressi contenuti in `out/`.
+   - Il contenuto di `out/mapping_subset.json`.
+3. Chiedi al modello di analizzare o modificare il codice. Il modello userà `mapping_subset.json` come vocabolario per comprendere i token `§§...§§`.
+
+### Scenario B — File molto grandi (Con Chunking)
+1. Esegui la compressione con chunking:
+   ```sh
+   python3 cli.py -i ./progetto -o out --chunk-output --chunk-size 16000
+   ```
+2. Invia al modello:
+   - `out/chunks/manifest.json` (per definire l'ordine dei pezzi).
+   - `out/mapping_subset.json` (vocabolario dei token).
+   - I file `0001.txt`, `0002.txt` nell'ordine indicato.
 
 ---
 
-## 12. Parametri CLI
-(ordinati alfabeticamente)
+## 7. Parametri da Linea di Comando (CLI)
 
-| **Flag** | **Tipo** | **Descrizione** | **Range / note** | **Esempio** |
-| --- | --- | --- | --- | --- |
-| **--B_max_lines** | intero | Numero massimo di righe per candidati block. | ≥ B_min_lines | `--B_max_lines 20` |
-| **--B_min_lines** | intero | Numero minimo di righe per candidati block. | minimo 1 | `--B_min_lines 5` |
-| **--chunk-output** | flag | Genera chunk dei file compressi in `OUT_DIR/chunks/`. | flag booleano | `--chunk-output` |
-| **--chunk-size** | intero | Dimensione massima dei chunk in caratteri. | default 16000 | `--chunk-size 16000` |
-| **--export-manifest** | flag | Genera `manifest.json` compatto (paths, files, ph, v). | flag booleano | `--export-manifest` |
-| **--include-pointless** | flag | NON esclude estensioni binarie/inutili durante lo scan. | default: esclusi | `--include-pointless` |
-| **--input, -i** | stringa | Directory o file‑lista da processare. | deve esistere | `--input ./project` |
-| **--L_min** | intero | Lunghezza minima substring per rolling hash. | 4–2000; default 64 | `--L_min 24` |
-| **--min_total_saving** | intero | Risparmio minimo richiesto per accettare una sostituzione. | minimo 0; default 100 | `--min_total_saving 20` |
-| **--N_min** | intero | Occorrenze minime per considerare una substring candidata. | minimo 2 | `--N_min 2` |
-| **--no-export-mapping** | stringa opzionale | Disabilita l’export di `mapping_subset.json` o esclude file specifici. | senza valore → nessun export; con lista → esclude quei file | `--no-export-mapping`, `--no-export-mapping a/b.txt,c/d.py` |
-| **--output, -o** | stringa | Directory di output. | default: `./compressed_output` | `--output ./out` |
-| **--placeholder-blk** | stringa formato | Formato placeholder per block. | più corto → output più piccolo | `--placeholder-blk "§§b{:03d}§§"` |
-| **--placeholder-sub** | stringa formato | Formato placeholder per substring. | più corto → output più piccolo | `--placeholder-sub "§§s{:03d}§§"` |
-| **--verify-roundtrip** | flag | Verifica roundtrip e fallisce se non coincide. | flag booleano | `--verify-roundtrip` |
-
----
-
-## 13. Parametri ottimizzabili
-Range minimo/massimo, preset consigliati e note operative.
-
-| Parametro | Range | Aggressivo | Conservativo | Max risparmio token | Note |
-|----------|:-----:|-----------:|-------------:|---------------------:|------|
-| **L_min** | 4 / ~2000 | 16 | 64 | 24–32 | Più basso → più match → più placeholder → più compressione. |
-| **N_min** | 2 / ~100 | 2 | 3–4 | 2 | 2 = massimo rilevamento ripetizioni. |
-| **B_min_lines** | 1 / ~50 | 2 | 5 | 3 | Blocchi troppo piccoli = più placeholder. |
-| **B_max_lines** | B_min_lines / ~200 | 8–12 | 20 | 6–10 | Più basso → blocchi più granulari. |
-| **min_total_saving** | 0 / ∞ | 0–10 | 100 | 0 | 0 = accetta tutto ciò che comprime anche di 1 carattere. |
-| **chunk-size** | 2000 / ∞ | 8000 | 16000 | 4000–8000 | Influisce solo sui chunk, non sulla compressione. |
+| Flag | Tipo | Default | Descrizione | Esempio |
+| :--- | :--- | :--- | :--- | :--- |
+| **--input, -i** | Stringa | *Obbligatorio* | Cartella radice o file-lista da elaborare. | `-i ./src` |
+| **--output, -o** | Stringa | `compressed_output` | Cartella in cui salvare i risultati. | `-o ./out` |
+| **--keep-empty-lines**| Flag | `False` | Preserva tutte le righe vuote (modalità lossless pura). | `--keep-empty-lines` |
+| **--verify-roundtrip** | Flag | `False` | Ricostruisce il testo e verifica matematicamente l'esatta uguaglianza con l'originale. | `--verify-roundtrip` |
+| **--chunk-output** | Flag | `False` | Suddivide i file compressi in porzioni dentro `OUT_DIR/chunks/`. | `--chunk-output` |
+| **--chunk-size** | Intero | `16000` | Dimensione massima (in caratteri) di ciascun chunk. | `--chunk-size 8000` |
+| **--export-manifest** | Flag | `False` | Genera `manifest.json` con la struttura dei file e le firme SHA256. | `--export-manifest` |
+| **--L_min** | Intero | `64` | Lunghezza minima di una sequenza ripetuta per essere compressa. | `--L_min 32` |
+| **--N_min** | Intero | `2` | Numero minimo di ripetizioni richieste per sostituire una sequenza. | `--N_min 2` |
+| **--B_min_lines** | Intero | `5` | Numero minimo di righe per un blocco ripetuto. | `--B_min_lines 3` |
+| **--B_max_lines** | Intero | `20` | Numero massimo di righe per un blocco ripetuto. | `--B_max_lines 10` |
+| **--min_total_saving**| Intero | `100` | Risparmio minimo di caratteri richiesto per ammettere un placeholder. | `--min_total_saving 30` |
+| **--no-export-mapping**| Stringa | `None` | Ometti per esportare tutto; passa senza valore per non esportare; passa lista separata da virgole per escludere file. | `--no-export-mapping a.py,b.py` |
+| **--include-pointless**| Flag | `False` | Include anche estensioni binarie o non testuali nella scansione. | `--include-pointless` |
+| **--placeholder-sub** | Stringa | `§§s{:03d}§§` | Modello di formattazione per token di sottostringa. | `--placeholder-sub "§s{:02d}§"` |
+| **--placeholder-blk** | Stringa | `§§b{:03d}§§` | Modello di formattazione per token di blocco. | `--placeholder-blk "§b{:02d}§"` |
 
 ---
 
-## 14. Preset
+## 8. Preset Pronti all'Uso
 
-**Preset completo (aggressivo)**
-
+### A) Massimo Risparmio Token (Consigliato per repository di codice)
+Rileva ripetizioni anche brevi e compatta le righe vuote del codice sorgente:
 ```sh
 python3 cli.py \
-  --input ../directory/file.sh \
-  --output ./out \
-  --L_min 30 \
-  --N_min 2 \
-  --B_min_lines 3 \
-  --B_max_lines 10 \
-  --min_total_saving 20 \
-  --placeholder-sub "§§s{:03d}§§" \
-  --placeholder-blk "§§b{:03d}§§" \
-  --export-manifest \
-  --verify-roundtrip \
-  --chunk-output \
-  --chunk-size 15000
-```
-
----
-
-**Preset tipico**
-
-```sh
-python3 cli.py \
-  --input ../selected/directory/ \
+  --input ./mio_progetto \
+  --output ./out_ottimizzato \
   --L_min 32 \
   --N_min 2 \
   --B_min_lines 3 \
-  --B_max_lines 10 \
-  --min_total_saving 20 \
-  --export-manifest \
+  --B_max_lines 12 \
+  --min_total_saving 25 \
+  --verify-roundtrip
+```
+
+### B) Modalità Lossless Pura (Preservazione totale al byte)
+Mantiene ogni singolo spazio o riga vuota originale:
+```sh
+python3 cli.py \
+  --input ./mio_progetto \
+  --output ./out_lossless \
+  --keep-empty-lines \
+  --verify-roundtrip
+```
+
+### C) Modalità File Grandi con Chunking
+Ottimale quando i sorgenti superano i 100-200 KB per singolo file:
+```sh
+python3 cli.py \
+  --input ./mio_progetto \
+  --output ./out_chunks \
+  --chunk-output \
+  --chunk-size 12000 \
   --verify-roundtrip
 ```
 
 ---
 
-## 15. Comandi per generare il manifest
+## 9. Risoluzione dei Problemi e Verifica
 
-### **Genera solo il manifest (senza compressione)**
-```sh
-python3 cli.py --input INPUT_DIR --output OUT_DIR --export-manifest
-```
-
-### **Pipeline completa + manifest**
-```sh
-python3 cli.py --input INPUT_DIR --output OUT_DIR --export-manifest
-```
-
-### **Esempio reale**
-```sh
-python3 cli.py -i ../directory/file.xx -o ./out --export-manifest
-```
-
----
-
-## 16. Dove trovare il manifest e cosa contiene
-
-### **manifest.json** (struttura originale)
-Percorso:  
-`OUT_DIR/manifest.json`
-
-Contiene:
-- `paths`: elenco file
-- `files`: placeholder usati per file
-- `ph`: metadati placeholder
-- `v`: versione schema
-
-### **chunks/manifest.json** (solo se chunking attivo)
-Percorso:  
-`OUT_DIR/chunks/manifest.json`
-
-Contiene:
-- elenco chunk
-- ordine dei chunk per ogni file
-- SHA256 atteso (se presente)
-
----
-
-## 17. Note operative rapide
-- L’input può essere una directory o una file‑lista.  
-- I file binari/inutili vengono esclusi automaticamente (usa `--include-pointless` per includerli).  
-- `mapping_subset.json` è pensato per l’uso in chat LLM.  
-- `reverse_map.json` è completo ma molto grande.  
-- `--export-manifest` è idempotente.  
-- I chunk sono utili per file molto grandi o per chat con limiti di input. 
+* **Il controllo `--verify-roundtrip` fallisce**:  
+  Se durante la verifica viene rilevata una discrepanza tra il testo target e quello ricostruito, il programma termina con codice di uscita `2` e scrive il file `roundtrip_failures.json` contenente l'offset del primo carattere difforme e la porzione di testo non coincidente.
+* **I chunk tagliano il codice a metà?**:  
+  No: l'algoritmo di chunking atomico boundary-aware impedisce tassativamente tagli all'interno dei placeholder e arretra all'ultimo ritorno a capo `\n` valido prima del limite di caratteri.
+* **Risparmio netto negativo?**:  
+  Se `Net saved chars` risulta negativo o vicino allo zero, il codice di partenza contiene pochissime porzioni duplicate rispetto all'overhead del dizionario. In tal caso, puoi alzare `--min_total_saving` (es. a `150` o `200`) per selezionare solo le ripetizioni ad alto rendimento.
 
 ---
 
 ## Licenza
 
-Compressore locale LLM‑ready è distribuito sotto licenza **GNU GPL v3**.  
-Vedi **[LICENSE](LICENSE)** per il testo completo.
+Questo progetto è distribuito sotto licenza **GNU General Public License v3.0 (GPL-3.0-or-later)**. Consulta il file [LICENSE](LICENSE) per il testo completo.
 
 ---
 
@@ -357,4 +252,5 @@ L’architettura e le decisioni tecniche restano curate manualmente.
 
 - Autore: Cristian Evangelisti  
 - Email: opensource​@​cevangel.​anonaddy.​me  
-- Repository:  https://github.com/kamaludu/chunk-compress
+- Repository: https://github.com/kamaludu/chunk-compress
+
