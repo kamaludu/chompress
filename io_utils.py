@@ -1,36 +1,40 @@
 #!/usr/bin/env python3
 """
-Compressore locale LLM‑ready
+Local LLM-ready Compressor
 File: io_utils.py
 Copyright (C) 2026 Cristian Evangelisti
 License: GPL-3.0-or-later
 SPDX-License-Identifier: GPL-3.0-or-later
 Source: https://github.com/kamaludu/chunk-compress
 
-Descrizione:
-Funzioni di I/O sicuro (esteso con helper opzionali per JSON).
+Description:
+Safe, atomic I/O utilities optimized for large files:
+- Directory creation with recursive parents support.
+- Streamed atomic file writing without heap duplication.
+- Buffered SHA256 file and text hashing.
+- Atomic JSON serialization.
 """
 
-import os
-import tempfile
 import hashlib
-from pathlib import Path
-from typing import Union, Optional
 import json
+import os
+from pathlib import Path
+import tempfile
+from typing import Any, Optional, Union
 
 PathLike = Union[str, Path]
 
 
 def ensure_dir(path: PathLike) -> None:
     """
-    Crea la directory (ricorsiva) se non esiste.
+    Ensure the parent or target directory exists, creating parents recursively.
     """
     Path(path).mkdir(parents=True, exist_ok=True)
 
 
 def read_bytes(path: PathLike) -> bytes:
     """
-    Legge e restituisce i bytes del file.
+    Read and return raw file bytes.
     """
     p = Path(path)
     with p.open("rb") as f:
@@ -39,22 +43,23 @@ def read_bytes(path: PathLike) -> bytes:
 
 def read_text(path: PathLike, encoding: str = "utf-8", errors: str = "strict") -> str:
     """
-    Legge un file come testo (UTF-8 di default).
-    errors può essere 'strict'|'replace'|'ignore' a seconda delle esigenze.
+    Read file as text with specified encoding and error handling.
     """
     p = Path(path)
     with p.open("r", encoding=encoding, errors=errors) as f:
         return f.read()
 
 
-# backward-compatible alias
 def read_utf8(path: PathLike) -> str:
+    """
+    Backwards-compatible alias for read_text with UTF-8 encoding.
+    """
     return read_text(path, encoding="utf-8", errors="strict")
 
 
 def safe_remove(path: PathLike) -> None:
     """
-    Rimuove un file se esiste; ignora errori.
+    Silently remove a file if it exists, ignoring OS errors.
     """
     try:
         p = Path(path)
@@ -66,10 +71,9 @@ def safe_remove(path: PathLike) -> None:
 
 def write_atomic(path: PathLike, data: Union[str, bytes], encoding: str = "utf-8") -> None:
     """
-    Scrive data in modo atomico su 'path'.
-    - Se data è str, viene codificato con 'encoding'.
-    - Usa tempfile.mkstemp nella stessa directory per garantire atomicità con os.replace.
-    - Sincronizza il file su disco quando possibile.
+    Write data atomically to destination path using a temporary file in the same directory.
+    Avoids duplicate memory allocations on large strings by streaming text directly via os.fdopen.
+    Guarantees cross-platform replacement and flushes to disk via fsync where supported.
     """
     p = Path(path)
     ensure_dir(p.parent)
@@ -77,26 +81,29 @@ def write_atomic(path: PathLike, data: Union[str, bytes], encoding: str = "utf-8
     fd = None
     tmp_path = None
     try:
-        # mkstemp crea un file descriptor aperto; lo useremo per scrivere bytes
         fd, tmp_path = tempfile.mkstemp(prefix=p.name + ".", dir=str(p.parent))
-        # apri il fd come file binario
-        with os.fdopen(fd, "wb") as f:
-            if isinstance(data, str):
-                b = data.encode(encoding)
-            else:
-                b = data
-            f.write(b)
-            f.flush()
-            try:
-                os.fsync(f.fileno())
-            except Exception:
-                # fsync può fallire su alcuni FS (es. tmpfs) — non fatale
-                pass
-        # sostituisci in modo atomico
+        if isinstance(data, str):
+            # Stream directly in text mode to avoid allocating duplicate bytes buffer in heap
+            with os.fdopen(fd, "w", encoding=encoding, errors="strict") as f:
+                f.write(data)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except Exception:
+                    pass
+        else:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except Exception:
+                    pass
+
+        # Atomic replacement (tempfile is closed and replaced)
         os.replace(tmp_path, str(p))
         tmp_path = None
     finally:
-        # cleanup se qualcosa è andato storto
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.remove(tmp_path)
@@ -104,32 +111,30 @@ def write_atomic(path: PathLike, data: Union[str, bytes], encoding: str = "utf-8
                 pass
 
 
-def sha256_file(path: PathLike) -> str:
+def sha256_file(path: PathLike, buffer_size: int = 65536) -> str:
     """
-    Calcola SHA256 di un file (bytes).
+    Compute SHA256 checksum of a file using 64 KB buffers to optimize I/O on large files.
     """
     p = Path(path)
     h = hashlib.sha256()
     with p.open("rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
+        for chunk in iter(lambda: f.read(buffer_size), b""):
             h.update(chunk)
     return h.hexdigest()
 
 
 def sha256_text(s: str, encoding: str = "utf-8") -> str:
     """
-    Calcola SHA256 di una stringa (codificata in UTF-8 di default).
+    Compute SHA256 checksum of a string encoded in UTF-8.
     """
     return hashlib.sha256(s.encode(encoding)).hexdigest()
 
 
-def write_json_atomic(path: PathLike, obj: object, **json_kwargs) -> None:
+def write_json_atomic(path: PathLike, obj: Any, **json_kwargs: Any) -> None:
     """
-    Serializza obj in JSON e lo scrive in modo atomico.
-    Usa write_atomic internamente.
-    json_kwargs vengono passati a json.dumps (indent, separators, ensure_ascii, ecc.).
+    Serialize obj to JSON and write atomically to disk.
+    Defaults to indent=2 and ensure_ascii=False for UTF-8 readability.
     """
-    # default: indent=2 per leggibilità, ensure_ascii=False per UTF-8
     kwargs = {"ensure_ascii": False, "indent": 2}
     kwargs.update(json_kwargs)
     data = json.dumps(obj, **kwargs)
