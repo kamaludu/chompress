@@ -237,7 +237,7 @@ python3 cli.py \
 
 ## Licenza
 
-Questo progetto è distribuito sotto licenza **GNU General Public License v3.0 (GPL-3.0-or-later)**. Consulta il file `LICENSE` per il testo completo.
+Questo progetto è distribuito sotto licenza **GNU General Public License v3.0 (GPL-3.0-or-later)**. Consulta il file [LICENSE](LICENSE) per il testo completo.
 
 ---
 
