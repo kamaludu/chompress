@@ -5,7 +5,7 @@ File: core.py
 Copyright (C) 2026 Cristian Evangelisti
 License: GPL-3.0-or-later
 SPDX-License-Identifier: GPL-3.0-or-later
-Source: https://github.com/kamaludu/chunk-compress
+Source: https://github.com/kamaludu/chompress
 
 Description:
 Core compression pipeline optimized for LLM context token economy:
@@ -22,7 +22,7 @@ Core compression pipeline optimized for LLM context token economy:
 - Global repository dictionary (P1.3): unified cross-file deduplication amortizing
   dictionary overhead over all repository occurrences.
 - Multi-tier candidate detection:
-  * Words and identifier tokens.
+  * Words and identifier tokens down to 4 characters with BPE yield validation.
   * Rabin-Karp 64-bit rolling hash substring repetition detector.
   * P2.2: Dynamic Sliding Block Discovery via 60-bit line-level polynomial rolling hash.
 - Frequency-weighted replacement selection integrating Alphabet Optimizer.
@@ -286,7 +286,7 @@ def find_repetitions(
     Detects repeated candidates across words, rolling-hash substrings, and line blocks.
     De-duplicates candidate hashes to ensure a unified candidate pool across all files.
     """
-    word_candidates = _find_word_candidates(contents, min_len=6, min_freq=max(3, N_min))
+    word_candidates = _find_word_candidates(contents, min_len=4, min_freq=max(3, N_min))
     substring_candidates = _find_substring_candidates(contents, L_min, N_min, L_max)
     block_candidates = _find_block_candidates(contents, B_min_lines, B_max_lines)
 
@@ -303,9 +303,12 @@ def find_repetitions(
 
 
 def _find_word_candidates(
-    contents: Dict[str, str], min_len: int = 6, min_freq: int = 3
+    contents: Dict[str, str], min_len: int = 4, min_freq: int = 3
 ) -> List[Dict[str, Any]]:
-    """Identifies recurring identifier tokens and words across files."""
+    """
+    Identifies recurring identifier tokens and words across files.
+    Scans tokens down to 4 characters to capture high-frequency identifiers.
+    """
     word_re = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{%d,}\b" % (min_len - 1))
     word_occs: Dict[str, List[Tuple[str, int, int]]] = {}
 
@@ -592,10 +595,11 @@ def select_replacements(
     """
     P0, P1, P2, P3 & P4 Token-Aware Replacement Selection with Global Dictionary Amortization:
     1. Pre-scores candidates across all files: marginal dictionary cost is paid once in global map.
-    2. Sorts candidates descending by net gain and overall repository frequency.
-    3. Builds the optimized placeholder alphabet (assigning 1-token symbols to top frequency patterns).
-    4. Applies collision-free greedy selection with interval overlap resolution per file.
-    5. Finalizes and trims active alphabet strictly to the selected replacements.
+    2. Filters out candidates yielding zero per-occurrence token reduction (tok_content <= tok_ph).
+    3. Sorts candidates descending by net gain and overall repository frequency.
+    4. Builds the optimized placeholder alphabet (assigning 1-token symbols to top frequency patterns).
+    5. Applies collision-free greedy selection with interval overlap resolution per file.
+    6. Finalizes and trims active alphabet strictly to the selected replacements.
     """
     if tok is None:
         tok = tokenizer.get_tokenizer("heuristic")
@@ -626,6 +630,11 @@ def select_replacements(
 
         tok_content = tok.count(content)
         tok_ph = tok.count(sample_ph)
+
+        # Early token efficiency guard: skip if original content is not strictly larger than placeholder
+        if tok_content <= tok_ph:
+            continue
+
         tok_map = map_serializer.estimate_entry_tokens(sample_ph, content, tok)
 
         # Global repository dictionary amortization: tok_map is deducted once for all N occurrences
@@ -738,7 +747,7 @@ def apply_placeholders(
     reverse_map: Dict[str, Any] = {
         "placeholders": {},
         "ph_meta": {},
-        "metadata": {"tool": "chunk_compress", "version": "3.4.1"},
+        "metadata": {"tool": "chompress", "version": "3.5.0"},
     }
 
     placeholders_dict = reverse_map["placeholders"]
