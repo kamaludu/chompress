@@ -277,7 +277,7 @@ Perché nei sistemi di tokenizzazione dei modelli moderni (BPE), questi simboli 
 ### Il programma è sicuro? Modifica file di sistema o esegue il codice?  
 **No.** `chompress` non usa la cartella globale `/tmp` di sistema, non esegue comandi dinamici (`eval` o `exec`), non richiede privilegi di amministratore e opera esclusivamente tramite analisi statica AST e algoritmi di hashing bufferizzati.
 
-Maggiori informazioni su: [SPEC.md](SPEC.md)
+Maggiori informazioni consulta: [SPECIFICA TECNICA DI SISTEMA](SPEC.md)
 
 ---
 
