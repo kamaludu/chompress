@@ -1,13 +1,13 @@
-# SPECIFICA TECNICA DI SISTEMA: chunk-compress (v3.4.0)
+# SPECIFICA TECNICA DI SISTEMA: chompress (v3.4.0)
 
 **Architettura Software, Contratti di Interfaccia, Modello di Token Economics P0-P4 e Pipeline di Esecuzione**  
 *Progetto: Local LLM-ready Context Compressor (Token-First Architecture)*  
 *Autore: Cristian Evangelisti*  
 *Licenza: GNU General Public License v3.0 (GPL-3.0-or-later)*  
-*Codice sorgente: https://github.com/kamaludu/chunk-compress*
+*Codice sorgente: https://github.com/kamaludu/chompress*
 
 ```text
-chunk-compress/        # Project Structure
+chompress/        # Project Structure
 ├── LICENSE            # GNU General Public License v3.0 +
 ├── PROMPT.md          # Prompt Master
 ├── README.md          # Readme & User Guide 
@@ -20,7 +20,7 @@ chunk-compress/        # Project Structure
 ├── minifiers.py       # Semantic Canonicalization & Aggressive Compactor
 ├── placeholders.py    # Alphabet Optimizer & Multi-Range Generator
 ├── test.sh            # End-to-end integration and smoke-test harness
-├── test_suite.py      # Comprehensive Test Suite for chunk-compress
+├── test_suite.py      # Comprehensive Test Suite for chompress
 └── tokenizer.py       # Tokenizer Heuristic Calibration & BPE Alignment
 ```
 
@@ -28,7 +28,7 @@ chunk-compress/        # Project Structure
 
 ## 1. Visione d'Insieme e Gerarchia degli Obiettivi
 
-`chunk-compress` è un motore di compressione e canonicalizzazione del contesto progettato per massimizzare la capienza utile e l'efficienza di ragionamento dei Large Language Models (LLM).
+`chompress` è un motore di compressione e canonicalizzazione del contesto progettato per massimizzare la capienza utile e l'efficienza di ragionamento dei Large Language Models (LLM).
 
 ### 1.1 Gerarchia dei Vincoli di Progetto
 1. **Massimo risparmio netto di token (Metrica Sovrana)**: L'architettura ottimizza l'occupazione nello spazio dei token del modello di destinazione (BPE cl100k_base, o200k_base, tokenizzatori LLaMA 3/Qwen), non la mera dimensione in byte o caratteri su disco.
@@ -334,7 +334,7 @@ Serializzazione standard `json.dumps(mapping, ensure_ascii=False, separators=(",
 - **`--envelope, -e`**: Incapsula lo stream di output all'interno di un envelope ottimizzato per LLM:
   ```text
   <context>
-  [LLM-READY COMPRESSED CONTEXT - chunk-compress v3.4.0]
+  [LLM-READY COMPRESSED CONTEXT - chompress v3.4.0]
   [INSTRUCTION: Expand placeholders using mapping dictionary before execution or analysis.]
   (protocol header)
   (mapping payload)
