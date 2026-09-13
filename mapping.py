@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
 Local LLM-ready Compressor
-File: mapping.py (P2.3 Protocol Header Multi-Range Support)
+File: mapping.py (P2.3 Protocol Header Multi-Range Support & 1-Token Compact Sentinel)
 Copyright (C) 2026 Cristian Evangelisti
 License: GPL-3.0-or-later
 SPDX-License-Identifier: GPL-3.0-or-later
-Source: https://github.com/kamaludu/chunk-compress
+Source: https://github.com/kamaludu/chompress
 
 Description:
 High-efficiency, tokenizer-aware mapping serialization engines.
 Supports:
 1. Positional: Zero-key indexed array with ultra-compact protocol headers (~8 to ~28 tokens):
+   - Ultra-compact 1-token sentinel delimiter ("§", "¶", "‡") saving ~3-4 tokens per replacement entry.
    - Contiguous CJK range headers: [MAP:INDEXED cjk_start=19968 count=N]
    - P2.3 Multi-Range CJK headers: [MAP:INDEXED cjk_ranges="19968-20050,20060-20500" count=N]
    - P2.3 Hybrid CJK + Prefix spillover: [MAP:INDEXED cjk_ranges="..." prefix='^' p_start=1 p_count=M]
@@ -203,6 +204,7 @@ class PositionalMappingSerializer(BaseMappingSerializer):
     """
     Positional mapping: stores ONLY replacement values in indexed order.
     Zero tokens spent on placeholder keys in the body.
+    Employs an ultra-compact 1-token sentinel delimiter to minimize dictionary overhead.
     Supports ultra-compact headers (~8 to ~28 tokens) for:
     - Contiguous CJK ideographs (cjk_start=19968 count=N)
     - P2.3 Multi-Range CJK (cjk_ranges="19968-20050,20060-20500" count=N)
@@ -212,14 +214,24 @@ class PositionalMappingSerializer(BaseMappingSerializer):
     """
 
     name: str = "positional"
-    DEFAULT_SENTINEL: str = "\n---§---\n"
+    DEFAULT_SENTINEL: str = "§"
+    SENTINEL_CANDIDATES: Tuple[str, ...] = ("§", "¶", "‡", "†", "␞", "␟")
 
     def _get_safe_sentinel(self, raw_corpus: str, values: List[str]) -> str:
-        sentinel = self.DEFAULT_SENTINEL
+        """
+        Selects a collision-free 1-token sentinel delimiter.
+        Iterates through candidate symbols strictly absent from raw corpus and values.
+        """
         all_text = raw_corpus + "".join(values)
-        while sentinel.strip() in all_text:
+        for cand in self.SENTINEL_CANDIDATES:
+            if cand not in all_text:
+                return cand
+
+        # Fallback if all 1-character candidates collide (extremely rare)
+        sentinel = "\n---§---\n"
+        while sentinel in all_text:
             suffix = hashlib.sha256(sentinel.encode("utf-8")).hexdigest()[:4]
-            sentinel = "\n---§" + suffix + "---\n"
+            sentinel = f"\n---§{suffix}---\n"
         return sentinel
 
     def _extract_cjk_ranges(self, cps: List[int]) -> List[Tuple[int, int]]:
