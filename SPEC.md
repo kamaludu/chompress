@@ -1,6 +1,7 @@
 # SPECIFICA TECNICA DI SISTEMA: chompress 
 
-***version 3.5.0***
+***version 3.5.0***  
+
 **Architettura Software, Contratti di Interfaccia, Modello di Token Economics P0-P4 e Pipeline di Esecuzione**  
 *Progetto: Local LLM-ready Context Compressor (Token-First Architecture)*  
 *Autore: Cristian Evangelisti*  
