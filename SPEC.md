@@ -1,21 +1,21 @@
-# SPECIFICA TECNICA DI SISTEMA: chompress (v3.4.0)
+# SPECIFICA TECNICA DI SISTEMA: chompress (v3.5.0)
 
 **Architettura Software, Contratti di Interfaccia, Modello di Token Economics P0-P4 e Pipeline di Esecuzione**  
 *Progetto: Local LLM-ready Context Compressor (Token-First Architecture)*  
 *Autore: Cristian Evangelisti*  
 *Licenza: GNU General Public License v3.0 (GPL-3.0-or-later)*  
-*Codice sorgente: https://github.com/kamaludu/chompress*
+*Codice sorgente: https://github.com/kamaludu/chompress*  
 
 ```text
-chompress/        # Project Structure
-├── LICENSE            # GNU General Public License v3.0 +
-├── PROMPT.md          # Prompt Master
-├── README.md          # Readme & User Guide 
+chompress/             # Project Structure
+├── LICENSE            # GNU General Public License v3.0
+├── PROMPT.md          # AI Prompt Master
+├── README.md          # User Guide & Documentation
 ├── SPEC.md            # System Technical Specification
 ├── benchmark.py       # P0 & Alphabet Optimizer Evaluation Harness
-├── cli.py             # Token-Aware CLI Orchestrator
+├── chompress.py       # Token-Aware CLI Orchestrator
 ├── core.py            # Token-Aware Core Pipeline
-├── io_utils.py        # I/O utilities
+├── io_utils.py        # Atomic I/O utilities
 ├── mapping.py         # Protocol Header Multi-Range Support
 ├── minifiers.py       # Semantic Canonicalization & Aggressive Compactor
 ├── placeholders.py    # Alphabet Optimizer & Multi-Range Generator
@@ -28,19 +28,22 @@ chompress/        # Project Structure
 
 ## 1. Visione d'Insieme e Gerarchia degli Obiettivi
 
-`chompress` è un motore di compressione e canonicalizzazione del contesto progettato per massimizzare la capienza utile e l'efficienza di ragionamento dei Large Language Models (LLM).
+`chompress` è un motore deterministico di compressione e canonicalizzazione del contesto progettato per massimizzare la capienza utile e l'efficienza di ragionamento dei Large Language Models (LLM).
 
 ### 1.1 Gerarchia dei Vincoli di Progetto
-1. **Massimo risparmio netto di token (Metrica Sovrana)**: L'architettura ottimizza l'occupazione nello spazio dei token del modello di destinazione (BPE cl100k_base, o200k_base, tokenizzatori LLaMA 3/Qwen), non la mera dimensione in byte o caratteri su disco.
-2. **Minima perdita informativa sostanziale**: Le trasformazioni ammesse preservano l'intero grafo causale, la logica di esecuzione e le relazioni semantiche del codice e dei dati.
-3. **Assenza del vincolo di leggibilità umana**: La leggibilità da parte dell'essere umano non costituisce un requisito. Sono ammesse e incentivate minificazioni aggressive e compattazioni sintetiche, purché il modello linguistico sia in grado di interpretare, elaborare o de-sostituire fedelmente il contesto.
-4. **Architettura Single-File First**: Il sistema opera in modo diretto, atomico e privo di sovrastrutture di directory quando riceve singoli script, documenti o flussi pipe Unix (`stdin` / `stdout`), scalando in modo trasparente su repository multi-file tramite dizionari ammortizzati a livello globale.
+1. **Zero Dipendenze Esterne**: Il motore, l'interfaccia CLI e la suite di test operano al 100% mediante la sola Standard Library di Python, senza dipendenze terze (`pip`).
+2. **Isolamento e Confinamento Locale (No System `/tmp/`)**: Divieto tassativo di utilizzare la directory `/tmp/` globale del sistema operativo. Qualsiasi operazione temporanea (scrittura atomica, chunking, esecuzione test) avviene esclusivamente all'interno di percorsi relativi locali dedicati nella cartella di lavoro del progetto.
+3. **Sicurezza e Integrità di Esecuzione (No `eval` / `exec`)**: Divieto tassativo di usare `eval` negli script Bash e di invocare funzioni di esecuzione dinamica di codice in Python (`eval()`, `exec()`, `os.system()`, chiamate `subprocess` con shell). Tutte le analisi e verifiche sul codice avvengono in modo statico (AST o `compile(..., "exec")` a sola validazione sintattica).
+4. **Massimo risparmio netto di token (Metrica Sovrana)**: L'architettura ottimizza l'occupazione nello spazio dei token del modello di destinazione (BPE cl100k_base, o200k_base, tokenizzatori LLaMA 3/Qwen), non la mera dimensione in byte o caratteri su disco.
+5. **Minima perdita informativa sostanziale**: Le trasformazioni preservano l'intero grafo causale, la logica di esecuzione e le relazioni semantiche del codice e dei dati.
+6. **Assenza del vincolo di leggibilità umana**: La leggibilità umana non costituisce un requisito. Sono ammesse e incentivate minificazioni lossy e compattazioni sintetiche, purché il modello linguistico sia in grado di comprendere, elaborare e ricostruire fedelmente il contesto.
+7. **Architettura Single-File First**: Il sistema opera in modo diretto, atomico e privo di sovrastrutture di directory quando riceve singoli script, documenti o flussi pipe Unix (`stdin` / `stdout`), scalando in modo trasparente su repository multi-file tramite dizionari ammortizzati a livello globale.
 
 ### 1.2 Mappa dei Componenti di Sistema (8 Moduli)
 
 ```text
 +---------------------------------------------------------------------------------+
-|                                    cli.py                                       |
+|                                  chompress.py                                   |
 |  Orchestrazione CLI, profili (aggressive/semantic/lossless), routing streaming  |
 |  (stdout vs stderr), gestione envelope P4.3, exit codes dedicati (0, 1, 2)      |
 +--------+------------------+-------------------+-------------------+-------------+
@@ -51,7 +54,7 @@ chompress/        # Project Structure
 | Pipeline AST   |  | Serializzatori|  | Alphabet        |  | Backend Tiktoken /  |
 | P1, P3, P4     |  | Positional,   |  | Optimizer, BPE  |  | HuggingFace /       |
 | (Licenze, Log, |  | Delimited, KV,|  | Tier 1 (CJK) e  |  | Heuristic Regex     |
-| Import, Assert)|  | JSON          |  | Tier 2 (Prefix) |  | BPE a 0 dipendenze  |
+| Argparse, Ren) |  | JSON          |  | Tier 2 (Prefix) |  | BPE a 0 dipendenze  |
 +--------+-------+  +-------+-------+  +--------+--------+  +----------+----------+
          |                  |                   |                      |
          +------------------+---------+---------+----------------------+
@@ -88,32 +91,44 @@ chompress/        # Project Structure
 L'intero sistema valuta le trasformazioni e le sostituzioni confrontando i token effettivi misurati o stimati. Nessuna formula adotta notazioni LaTeX o simboli non presenti sulla tastiera ASCII standard.
 
 ### 2.1 Bilancio Sovrano di Risparmio di Contesto
-Dati il testo originale $T_{orig}$ e il payload compresso $T_{comp}$:
+Dati il testo originale T_orig e il payload compresso T_comp:
 
 ```text
-tokens_payload = count_tokens(T_{comp})
+tokens_payload = count_tokens(T_comp)
 tokens_mapping = count_tokens(mapping_payload)
 tokens_protocol = count_tokens(protocol_header) + count_tokens(envelope_text)
 
-net_tokens_saved = tokens(T_{orig}) - (tokens_payload + tokens_mapping + tokens_protocol)
-net_compression_ratio = ((net_tokens_saved) * 100.0) / (tokens(T_{orig}))
+net_tokens_saved = tokens(T_orig) - (tokens_payload + tokens_mapping + tokens_protocol)
+net_compression_ratio = ((net_tokens_saved) * 100.0) / (tokens(T_orig))
 ```
 
-Se `net_tokens_saved <= 0`, la trasformazione o la sostituzione viene rigettata in quanto introduce sovraccarico (token penalty) all'interno del context window dell'LLM.
+Se `net_tokens_saved <= 0`, la sostituzione o la voce viene rigettata per evitare token penalty nel context window dell'LLM.
 
-### 2.2 Guadagno Marginale per Singolo Candidato di Deduplicazione
-Dato un pattern candidato con $N$ occorrenze nel corpus, contenuto $C$, placeholder assegnato $P$, costo marginale di rappresentazione nel dizionario $M_{cost}$ e delta di overhead del protocollo $D_{proto}$:
+### 2.2 Equazioni di Risparmio Specifiche per Canonicalizzazione (Stage 1)
 
 ```text
-candidate_net_gain = N * (tokens(C) - tokens(P)) - M_{cost} - D_{proto}
+tokens_license_saved = sum(i=1 to n_files, tokens(license_header_i) - tokens(lic_marker))
+tokens_err_saved = sum(j=1 to m_exceptions, tokens(verbose_str_j) - tokens(short_id_j))
+tokens_import_saved = sum(k=1 to p_imports, tokens(unused_import_k))
+tokens_assert_saved = sum(q=1 to r_asserts, tokens(assert_stmt_q))
+tokens_cli_saved = sum(u=1 to v_cli, tokens(narrative_kwarg_u))
+tokens_rename_saved = sum(m=1 to s_locals, freq_m * (tokens(orig_name_m) - 1))
+tokens_priv_saved = sum(p=1 to t_privates, freq_p * (tokens(orig_priv_p) - tokens(new_priv_p)))
+```
+
+### 2.3 Guadagno Marginale per Singolo Candidato di Deduplicazione (Stage 2)
+Dato un pattern candidato con N occorrenze nel corpus, contenuto C, placeholder assegnato P, costo marginale di rappresentazione nel dizionario M_cost e delta di overhead del protocollo D_proto:
+
+```text
+candidate_net_gain = N * (tokens(C) - tokens(P)) - M_cost - D_proto
 ```
 
 Nelle architetture con dizionario globale ammortizzato (P1.3):
-- $M_{cost}$ viene addebitato una sola volta per l'intero repository, ammortizzandosi su tutte le $N$ occorrenze complessive distribuite tra i vari file.
-- Nel formato `PositionalMappingSerializer`, $tokens(P) = 0$ all'interno del mapping poiché le chiavi sono omesse e dedotte per indice ordinale.
+- M_cost viene addebitato una sola volta per l'intero repository, ammortizzandosi su tutte le N occorrenze complessive distribuite tra i vari file.
+- Nel formato `PositionalMappingSerializer`, tokens(P) == 0 all'interno del mapping poiché le chiavi sono omesse e dedotte per indice ordinale.
 
-### 2.3 Modello di Allineamento Euristico del Tokenizzatore
-Dati $n$ campioni di calibrazione tra tokenizzatore euristico a zero dipendenze e tokenizzatore reale di riferimento:
+### 2.4 Modello di Allineamento Euristico del Tokenizzatore
+Dati n campioni di calibrazione tra tokenizzatore euristico a zero dipendenze e tokenizzatore reale di riferimento:
 
 ```text
 error_pct_i = ((abs(tokens_heuristic_i - tokens_real_i)) * 100.0) / (tokens_real_i)
@@ -124,7 +139,7 @@ bar_D = (sum(i=1 to n, diff_i)) / (float(n))
 variance_D = (sum(i=1 to n, (diff_i - bar_D) * (diff_i - bar_D))) / (float(n - 1))
 s_D = sqrt(variance_D)
 margin_95 = (1.96 * s_D) / (sqrt(float(n)))
-CI_95 = [bar_D - margin_95, bar_D + margin_95]
+CI_95%(bar_D) = [bar_D - margin_95, bar_D + margin_95]
 ```
 
 ---
@@ -133,7 +148,7 @@ CI_95 = [bar_D - margin_95, bar_D + margin_95]
 
 ### 3.1 `minifiers.py`: Pipeline di Canonicalizzazione e Compattazione (P1, P3, P4)
 
-Il modulo implementa trasformazioni del codice a livello AST (Abstract Syntax Tree) e tramite pattern matching per eliminare il testo superfluo prima dell'indicizzazione delle ripetizioni.
+Il modulo implementa trasformazioni del codice a livello AST (Abstract Syntax Tree) e pattern matching per eliminare testo superfluo prima dell'indicizzazione delle ripetizioni.
 
 #### Contratti Principali
 - **`strip_license_header(code: str, ext: str) -> str` (P3.1)**:
@@ -155,20 +170,31 @@ Il modulo implementa trasformazioni del codice a livello AST (Abstract Syntax Tr
   - Elimina link e immagini di badge grafici (shields.io, badgen.net, codecov, workflow GitHub Actions) sia in formato Markdown che HTML.
   - Compatta le tabelle Markdown eliminando gli spazi di allineamento visivo interni alle celle (`| col1 | col2 |` anziché `|   col1        |   col2   |`), preservando i delimitatori di allineamento (`:---:`).
 
-- **`minify_python(...) -> str` (P1.1, P3.2, P4.1, P4.2)**:
+- **`minify_python(...) -> str` (P1.1, P3.2, P4.1, P4.2, Vettori A e B)**:
   - Riceve il codice Python e ne genera l'AST (`ast.parse(code)`). In caso di errore sintattico di parsing, restituisce il codice originale intatto.
   - **`_DocstringStripper`**: Rimuove module, class e function docstrings. Sostituisce il corpo con `pass` qualora la docstring fosse l'unica istruzione del blocco.
   - **`_TypeAnnotationStripper`**: Rimuove le type annotations PEP 484/526 dagli argomenti delle funzioni, dal tipo di ritorno e trasforma `AnnAssign` (`x: int = 5`) in assegnazioni standard (`x = 5`), cancellando le annotazioni prive di valore (`x: int`).
   - **`_ErrorAndLogStringCompactor` (P3.2)**: Trasforma messaggi di eccezione verbose (`raise ValueError("very long explanatory string...")`) in token compatti (`raise ValueError("ERR")`) e compila le chiamate di log verbose (`logger.info("...")`) in `logger.info("LOG")` se il testo supera gli 8 caratteri.
   - **`_AssertPruner` (P4.2)**: Rimuove totalmente i nodi `ast.Assert` in modalità aggressiva.
+  - **`_ArgparseNarrativeStripper` (Vettore A)**: Strippa con whitelist rigorosa i soli argomenti narrativi di documentazione CLI (`help`, `description`, `epilog`) da `ArgumentParser`, `add_argument`, `add_parser` e `add_argument_group`. Preserva tassativamente tutti i parametri funzionali di configurazione (`type`, `default`, `choices`, `action`, `required`, `formatter_class`, `parents`, `conflict_handler`, `add_help`, `allow_abbrev`, ecc.).
   - **`_UsedNamesCollector` & `_UnusedImportPruner` (P4.1)**:
     - Raccoglie tutti i nomi con contesto `Load` nell'AST (compresi decoratori, classi base e tuple `__all__`).
     - Pota da `ast.Import` e `ast.ImportFrom` gli alias e i moduli non referenziati nel codice a runtime.
     - Preserva tassativamente gli import `__future__` e i wildcard import (`*`).
     - Rimuove integralmente le classi del modulo `typing` (`List`, `Dict`, `Optional`, `Union`) non più referenziate dopo lo stripping delle annotazioni di tipo.
-  - **`_LocalScopeAnalyzer` & `_LocalRenamer` (P1.1)**: Analizza lo scope di funzioni e metodi; se la funzione non invoca funzioni di riflessione (`eval`, `exec`, `locals`, `globals`, `vars`, `getattr`, `setattr`), rinomina in modo conservativo le variabili strettamente locali più lunghe di 3 caratteri in `_v1`, `_v2`, ecc.
+  - **`_ModuleScopeAnalyzer` & `_ModulePrivateRenamer` (Vettore B)**:
+    - Rinomina simboli privati top-level (`_foo` -> `_a`, `_b`...).
+    - Guardrail anti-riflessione: bails out se il modulo include chiamate o accessi a `eval`, `exec`, `locals`, `globals`, `getattr`, `setattr`, `hasattr`, `vars`, `dir`, `__dict__`.
+    - Esclude tassativamente nomi dunder (`__init__`), nomi esportati in `__all__`, import e simboli con ombreggiamento interno.
+    - Condizione di efficienza: ridenomina solo se `tok.count(old_name) > tok.count(new_name)`.
+  - **`_LocalScopeAnalyzer` & `_LocalRenamer`**:
+    - Rinomina variabili locali su funzioni esenti da riflessione.
+    - Assegna identificatori BPE a 1 token (`a`, `b`, `c`... Tier 1, `aa`, `ab`... Tier 2).
+    - **Filtro preventivo di efficienza**: esclude tassativamente le variabili che occupano già 1 solo token (`tok.count(name) <= 1`), azzerando l'inflazione sintattica e preservando simboli brevi naturali.
+    - Ordina i candidati per guadagno decrescente: `freq * (tok.count(name) - 1)`.
+    - Isola le funzioni nidificate proteggendo le closure.
   - **`_EmptyBodyFixer`**: Visita tutti i blocchi sintattici (`body`, `orelse`, `finalbody`) e inietta `pass` se lo svuotamento da asserzioni o import ha reso vuoto il blocco.
-  - Rigenera il sorgente con `ast.unparse(tree)` e valida l'integrità del codice risultante tramite `compile(code, "<minified>", "exec")`.
+  - Rigenera il sorgente con `ast.unparse(tree)` e valida l'integrità sintattica del codice risultante tramite `compile(code, "<minified>", "exec")`.
 
 - **`minify_json(code: str) -> str` & `minify_yaml(code: str) -> str` (P3.4)**:
   - JSON: deserializzazione e ricompattazione priva di spazi (`separators=(",", ":")`).
@@ -204,25 +230,25 @@ Gestisce la generazione e calibrazione dinamica dell'alfabeto dei token di sosti
 Serializza il dizionario delle sostituzioni per la trasmissione all'LLM.
 
 #### 1. `PositionalMappingSerializer` (Default Zero-Key Mapping)
-- **Principio**: Nel corpo del payload memorizza **esclusivamente i contenuti originali** separati da un delimitatore sicuro (sentinel predefinita `\n---§---\n`), omettendo totalmente le chiavi placeholder nel corpo.
+- **Principio**: Nel corpo del payload memorizza **esclusivamente i contenuti originali** separati da un delimitatore compatto a 1 token (sentinel predefinita `'§'`), omettendo totalmente le chiavi placeholder nel corpo.
 - **Header di Protocollo a Bassissimo Overhead (~8 - ~28 token)**:
   - **CJK Contiguo**:  
-    `[MAP:INDEXED sentinel='\n---§---\n' cjk_start=19968 count=N]`
+    `[MAP:INDEXED sentinel='§' cjk_start=19968 count=N]`
   - **CJK Multi-Range (P2.3)**:  
-    `[MAP:INDEXED sentinel='\n---§---\n' cjk_ranges='19968-20050,20060-20500' count=N]`
+    `[MAP:INDEXED sentinel='§' cjk_ranges='19968-20050,20060-20500' count=N]`
   - **Ibrido CJK + Prefix (P2.3)**:  
-    `[MAP:INDEXED sentinel='\n---§---\n' cjk_ranges='...' prefix='^' p_start=1 p_count=M]`
+    `[MAP:INDEXED sentinel='§' cjk_ranges='...' prefix='^' p_start=1 p_count=M]`
   - **Sequenza Prefisso**:  
-    `[MAP:INDEXED sentinel='\n---§---\n' prefix='^' start=1 count=N]`
+    `[MAP:INDEXED sentinel='§' prefix='^' start=1 count=N]`
   - **Sequenza Template**:  
-    `[MAP:INDEXED sentinel='\n---§---\n' seq='«{:d}»' start=1 count=N]`
+    `[MAP:INDEXED sentinel='§' seq='«{:d}»' start=1 count=N]`
 - **Ordinamento di Serializzazione**: Definito da `positional_sort_key`:
   - Tier 0: Caratteri CJK (ordinati per codepoint).
   - Tier 1: Prefissi numerici (`^1`, `^2`, ordinati per valore intero).
   - Tier 2: Simboli singoli generali.
   - Tier 3: Stringhe e template complessi in ordinamento naturale numerico.
 - **Invariante di Ricostruzione**:  
-  `deserialize(serialize(M, ph_meta)) == M` per qualsiasi dizionario $M$.
+  `deserialize(serialize(M, ph_meta)) == M` per qualsiasi dizionario M.
 
 #### 2. `DelimitedMappingSerializer`
 Memorizza blocchi `TOKEN\nCONTENUTO` separati da sentinel dinamica priva di collisioni. Preserva ritorni a capo e virgolette grezze senza l'overhead di escaping JSON.
@@ -238,7 +264,7 @@ Serializzazione standard `json.dumps(mapping, ensure_ascii=False, separators=(",
 ### 3.4 `core.py`: Motore Algoritmico e Pipeline di Deduplicazione
 
 #### 3.4.1 Rilevamento Ripetizioni Multi-Granularità
-1. **Identificatori e Parole (`_find_word_candidates`)**: Regex `\b[A-Za-z_][A-Za-z0-9_]{5,}\b`. Rileva parole con lunghezza `>= 6` e frequenza `>= 3`.
+1. **Identificatori e Parole (`_find_word_candidates`)**: Regex `\b[A-Za-z_][A-Za-z0-9_]{3,}\b`. Rileva parole con lunghezza `>= 4` e frequenza `>= 3`, escludendo a monte i candidati che non generano un guadagno netto rispetto al placeholder.
 2. **Rabin-Karp Substring Rolling Hash (`_find_substring_candidates`)**:
    - Finestra di scansione `L_min` caratteri.
    - Parametri rolling hash: `base = 257`, `mod = 2**61 - 1`.
@@ -254,16 +280,16 @@ Serializzazione standard `json.dumps(mapping, ensure_ascii=False, separators=(",
    - Calcolo rolling window per riga in tempo O(1):
      `h = ((h - hash_prev * power) * base + hash_next) % mod`
    - Verifica stringa esatta del blocco prima di confermare il candidato.
-
+ 
 #### 3.4.2 Selezione Greedy con Risoluzione Overlap O(log K) (`select_replacements`)
 - I candidati vengono pre-valutati:
   `tok_gain = N * (tok_content - tok_ph) - tok_map`
   dove `tok_map` è conteggiato una sola volta a livello di repository.
-- Ordinamento deterministico: per `tok_gain` decrescente, poi per frequenza $N$ decrescente, poi per lunghezza contenuto decrescente, infine per hash SHA-256.
+- Ordinamento deterministico: per `tok_gain` decrescente, poi per frequenza N decrescente, poi per lunghezza contenuto decrescente, infine per hash SHA-256.
 - Controllo collisioni: durante l'allocazione, se un placeholder è già presente nel testo originale, l'Alphabet Optimizer avanza al simbolo successivo.
 - Risoluzione sovrapposizioni (`_has_interval_overlap`):
-  Utilizza `bisect.bisect_right` con chiave di ricerca sulla coordinata di fine intervallo `end` su liste mantenute ordinate tramite `bisect.insort`. Complessità temporale: **O(log K)** per verifica, con $K$ intervalli occupati nel file.
-- Se un'occorrenza si sovrappone a un blocco prioritario precedentemente assegnato, **viene scartata solo la singola occorrenza sovrapposta**. Il pattern viene mantenuto se il numero residuo di occorrenze valide $N_{valid} >= 2$ continua a generare un guadagno netto positivo.
+  Utilizza `bisect.bisect_right` con chiave di ricerca sulla coordinata di fine intervallo `end` su liste mantenute ordinate tramite `bisect.insort`. Complessità temporale: **O(log K)** per verifica, con K intervalli occupati nel file.
+- Se un'occorrenza si sovrappone a un blocco prioritario precedentemente assegnato, **viene scartata solo la singola occorrenza sovrapposta**. Il pattern viene mantenuto se il numero residuo di occorrenze valide `N_valid >= 2` continua a generare un guadagno netto positivo superiore a `min_total_saving`.
 
 #### 3.4.3 Applicazione Placeholder e Protezione dei Confini (`apply_placeholders`)
 - Sostituisce le occorrenze valide nel testo da sinistra verso destra.
@@ -302,25 +328,28 @@ Serializzazione standard `json.dumps(mapping, ensure_ascii=False, separators=(",
 
 ---
 
-### 3.6 `cli.py`: Orchestratore e Contratti di Esecuzione
+### 3.6 `chompress.py`: Orchestratore e Contratti di Esecuzione
 
 #### 3.6.1 Modalità Operative Primarie (`--mode`)
 - **`--mode aggressive` (Default)**:
   Attiva l'intero spettro di canonicalizzatori e compattatori:
   - Rimozione licenze (P3.1)
   - Compattazione errori e log (P3.2)
+  - Stripping descrizioni narrative CLI Argparse (Vettore A)
+  - Ridenominazione simboli privati top-level (Vettore B)
+  - Ridenominazione identificatori locali a 1 token BPE (`a`, `b`, `c`...)
   - Pruning import inutilizzati e typing (P4.1)
   - Pruning asserzioni (P4.2)
   - Stripping commenti, docstring e tipi PEP 484/526
   - Minificazione Bash, Markdown, JSON e YAML
-  - Ridenominazione locali AST
   - Normalizzazione indentazione (4 spazi -> tab)
   - Eliminazione righe vuote nel codice
-  - Preset tuning: `aggressive` (`L_min=10`, `min_total_saving=1`)
+  - Inoltro del tokenizer attivo `tok` alla pipeline di canonicalizzazione AST
+  - Preset tuning consolidato: `aggressive` (`L_min=7`, `min_total_saving=3`, `B_min_lines=2`, `B_max_lines=6`)
 - **`--mode semantic`**:
   Preserva la semantica funzionale runtime:
   - Attiva stripping commenti, docstring, annotazioni di tipo, tabelle, badge e potatura import inutilizzati.
-  - **Disattiva** la compattazione stringhe di errore e il pruning delle asserzioni diagnostiche.
+  - **Disattiva** la compattazione stringhe di errore, il pruning delle asserzioni diagnostiche e lo stripping CLI.
   - Preset tuning: `code-max` (`L_min=14`, `min_total_saving=2`).
 - **`--mode lossless`**:
   Decompressione identica al byte su tutti i file:
@@ -334,7 +363,7 @@ Serializzazione standard `json.dumps(mapping, ensure_ascii=False, separators=(",
 - **`--envelope, -e`**: Incapsula lo stream di output all'interno di un envelope ottimizzato per LLM:
   ```text
   <context>
-  [LLM-READY COMPRESSED CONTEXT - chompress v3.4.0]
+  [LLM-READY COMPRESSED CONTEXT - chompress v3.5.0]
   [INSTRUCTION: Expand placeholders using mapping dictionary before execution or analysis.]
   (protocol header)
   (mapping payload)
@@ -354,16 +383,13 @@ Serializzazione standard `json.dumps(mapping, ensure_ascii=False, separators=(",
 ### 4.1 `mapping_subset.txt` & `protocol_header.txt` (Default Positional)
 - **`protocol_header.txt`**:
   ```text
-  [MAP:INDEXED sentinel='\n---§---\n' cjk_start=19968 count=3]
+  [MAP:INDEXED sentinel='§' cjk_start=19968 count=3]
   ```
 - **`mapping_subset.txt`**:
   ```text
   def calculate_hash(data):
-      return hashlib.sha256(data).hexdigest()
-  ---§---
-  validate_session(token)
-  ---§---
-  https://api.internal/v1/stream
+  return hashlib.sha256(data).hexdigest()
+  §validate_session(token)§https://api.internal/v1/stream
   ```
 
 ### 4.2 `reverse_map.json` (Registro di Ripristino Globale)
@@ -390,8 +416,8 @@ Serializzazione standard `json.dumps(mapping, ensure_ascii=False, separators=(",
     "count": 1
   },
   "metadata": {
-    "tool": "chunk_compress",
-    "version": "3.4.0"
+    "tool": "chompress",
+    "version": "3.5.0"
   }
 }
 ```
@@ -438,18 +464,22 @@ Serializzazione standard `json.dumps(mapping, ensure_ascii=False, separators=(",
 ## 5. Invarianti Formali di Sistema
 
 1. **Invariante di Disgiunzione degli Intervalli (Non-Overlap)**:  
-   Per qualsiasi coppia di sostituzioni approvate nello stesso file $I_1 = [s_1, e_1)$ e $I_2 = [s_2, e_2)$:  
+   Per qualsiasi coppia di sostituzioni approvate nello stesso file I_1 = [s_1, e_1) e I_2 = [s_2, e_2):  
    `e_1 <= s_2` oppure `e_2 <= s_1`.
 2. **Invariante di Uguaglianza Sostitutiva**:  
-   Per ogni sostituzione $r$ ed ogni sua occorrenza valida $o = (path, s, e)$:  
+   Per ogni sostituzione r ed ogni sua occorrenza valida o = (path, s, e):  
    `target_contents[path][s : e] == r["content"]`.
 3. **Invariante di Atomicità del Chunking (Boundary Safety)**:  
-   Dato qualsiasi punto di taglio del chunk $C_{cut}$ e un token protetto $P = [ph_{start}, ph_{end})$:  
+   Dato qualsiasi punto di taglio del chunk C_cut e un token protetto P = [ph_start, ph_end):  
    Non può esistere alcuna condizione per cui:  
-   `ph_{start} < C_{cut} < ph_{end}`.
+   `ph_start < C_cut < ph_end`.
 4. **Invariante di Reversibilità Perfetta**:  
-   Sia $T$ il testo target post-canonicalizzazione. Applicando la trasformazione di sostituzione `apply` e successivamente la decodifica `reconstruct` tramite `reverse_map`:  
+   Sia T il testo target post-canonicalizzazione. Applicando la trasformazione di sostituzione `apply` e successivamente la decodifica `reconstruct` tramite `reverse_map`:  
    `reconstruct(apply(T)) == T`.
 5. **Invariante di Ammortamento del Dizionario**:  
    La quota di token del dizionario associata a una voce di mappatura viene addebitata una sola volta a livello di repository, consentendo a pattern multi-file di ottenere un guadagno netto positivo anche con frequenze individuali basse per singolo file.
+6. **Invariante di Confinamento Locale**: 
+   Nessuna operazione di I/O può creare file al di fuori della cartella del file di destinazione o dell'albero di lavoro del progetto.
+7. **Invariante di Determinismo Statico**: 
+   Nessuna porzione di codice utente o trasformato viene eseguita a runtime dal programma durante le fasi di scansione, deduplicazione o test.
 
