@@ -747,7 +747,7 @@ def apply_placeholders(
     reverse_map: Dict[str, Any] = {
         "placeholders": {},
         "ph_meta": {},
-        "metadata": {"tool": "chompress", "version": "3.5.0"},
+        "metadata": {"tool": "chompress", "version": "1.0.0"},
     }
 
     placeholders_dict = reverse_map["placeholders"]
