@@ -1,6 +1,7 @@
-[![Chompress](https://img.shields.io/badge/Chompress-00aa55?style=for-the-badge&label=><&labelColor=004d00)](README.md)
+[![Chompress](https://img.shields.io/badge/Chompress-00aa55?style=for-the-badge&label=><&labelColor=004d00)](README.md)  
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-green.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](#)
+[![GitHub Release](https://img.shields.io/github/v/release/kamaludu/chompress?label=Latest%20Release)](https://github.com/kamaludu/chompress/releases/latest)
 
 # Chompress: Compressore di Contesto per AI
 ***version 1.0.0***
