@@ -365,7 +365,7 @@ Serializzazione standard `json.dumps(mapping, ensure_ascii=False, separators=(",
 - **`--envelope, -e`**: Incapsula lo stream di output all'interno di un envelope ottimizzato per LLM:
   ```text
   <context>
-  [LLM-READY COMPRESSED CONTEXT - chompress v3.5.0]
+  [LLM-READY COMPRESSED CONTEXT - chompress v1.0.0]
   [INSTRUCTION: Expand placeholders using mapping dictionary before execution or analysis.]
   (protocol header)
   (mapping payload)
@@ -419,7 +419,7 @@ Serializzazione standard `json.dumps(mapping, ensure_ascii=False, separators=(",
   },
   "metadata": {
     "tool": "chompress",
-    "version": "3.5.0"
+    "version": "1.0.0"
   }
 }
 ```
