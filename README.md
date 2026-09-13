@@ -3,7 +3,7 @@
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](#)
 
 # Chompress: Compressore di Contesto per AI
-***version 3.5.0***
+***version 1.0.0***
 
 **chompress** è uno strumento leggero e trasparente che riduce drasticamente le dimensioni di file sorgente, script e interi progetti software **prima di incollarli nella chat di un'intelligenza artificiale** (come ChatGPT, Claude, Copilot, DeepSeek o modelli locali).
 
