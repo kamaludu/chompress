@@ -12,7 +12,15 @@ Sostituendo le porzioni duplicate con abbreviazioni ad altissima efficienza ed e
 
 ## 1. Guida Rapida in 30 Secondi
 
-Non serve configurare nulla. Assicurati solo di avere **Python 3.8 o successivo** installato sul computer.
+**Installazione e Requisiti:**
+- **Python 3.8+**
+- **Nessuna dipendenza o libreria esterna da installare** (funziona con la sola libreria standard di Python).
+
+**Per clonare il repository:**
+```sh
+git clone --depth 1 --branch main https://github.com/kamaludu/chompress.git chompress
+cd chompress
+```
 
 ### Caso 1: Comprimere un singolo file pronto per il prompt (Consigliato!)
 Se hai un singolo file di codice o testo e vuoi creare subito un unico prompt da incollare nell'AI:
