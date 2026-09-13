@@ -1,337 +1,409 @@
-# SPECIFICA TECNICA DI SISTEMA: chunk-compress
+# SPECIFICA TECNICA DI SISTEMA: chunk-compress (v3.4.0)
 
-**Architettura Software, Contratti di Interfaccia, Modello di I/O e Pipeline di Esecuzione**  
-*Progetto: Compressore locale reversible text/code LLM-ready ottimizzato per file di grandi dimensioni*
-
----
-
-### Componenti del progetto:
-
-1. **`core.py`**: Motore algoritmico con P0 (roundtrip esatto `recon == target`, chunking atomico), P1 (espansione sincronizzata, filtro per singola occorrenza), P2 (memoizzazione O(1) offset, indice compatto a 64 bit) e P3 (metriche reali di risparmio netto e token).
-2. **`cli.py`**: Orchestratore CLI con `--keep-empty-lines`, gestione errori atomica ed exit codes dedicati (`0`, `1`, `2`).
-3. **`io_utils.py`**: I/O atomico memory-bounded su file grandi (streaming senza duplicazioni heap, buffer SHA256 a 64 KB).
-4. **`test_suite.py`**: Suite di test unitari automatizzati.
-5. **`test.sh`**: Test di integrazione end-to-end e infrastruttura di smoke test per chunk-compress.
-6. **`SPEC.md`**: Specifica Tecnica di Sistema: Riferimento architetturale completo per sviluppatori ed auditor.
-7. **`README.md`**: Guida operativa e documentazione utente.
-8. **`PROMPT MASTER`**: Guida ai prompt per LLM con verifica di integrità a due stadi.
+**Architettura Software, Contratti di Interfaccia, Modello di Token Economics P0-P4 e Pipeline di Esecuzione**  
+*Progetto: Local LLM-ready Context Compressor (Token-First Architecture)*  
+*Autore: Cristian Evangelisti*  
+*Licenza: GNU General Public License v3.0 (GPL-3.0-or-later)*  
+*Codice sorgente: https://github.com/kamaludu/chunk-compress*
 
 ---
 
-## 1. Visione d'Insieme e Separazione delle Responsabilità
+## 1. Visione d'Insieme e Gerarchia degli Obiettivi
 
-Il sistema è strutturato su tre livelli modulari disaccoppiati:
+`chunk-compress` è un motore di compressione e canonicalizzazione del contesto progettato per massimizzare la capienza utile e l'efficienza di ragionamento dei Large Language Models (LLM).
+
+### 1.1 Gerarchia dei Vincoli di Progetto
+1. **Massimo risparmio netto di token (Metrica Sovrana)**: L'architettura ottimizza l'occupazione nello spazio dei token del modello di destinazione (BPE cl100k_base, o200k_base, tokenizzatori LLaMA 3/Qwen), non la mera dimensione in byte o caratteri su disco.
+2. **Minima perdita informativa sostanziale**: Le trasformazioni ammesse preservano l'intero grafo causale, la logica di esecuzione e le relazioni semantiche del codice e dei dati.
+3. **Assenza del vincolo di leggibilità umana**: La leggibilità da parte dell'essere umano non costituisce un requisito. Sono ammesse e incentivate minificazioni aggressive e compattazioni sintetiche, purché il modello linguistico sia in grado di interpretare, elaborare o de-sostituire fedelmente il contesto.
+4. **Architettura Single-File First**: Il sistema opera in modo diretto, atomico e privo di sovrastrutture di directory quando riceve singoli script, documenti o flussi pipe Unix (`stdin` / `stdout`), scalando in modo trasparente su repository multi-file tramite dizionari ammortizzati a livello globale.
+
+### 1.2 Mappa dei Componenti di Sistema (8 Moduli)
 
 ```text
-+-----------------------------------------------------------------------+
-|                               cli.py                                  |
-|   Orchestrazione pipeline, contratti CLI, gestione ciclo di vita      |
-|   degli errori, exit codes (0, 1, 2) e reportistica token LLM         |
-+-----------------------------------+-----------------------------------+
-                                    |
-                                    v
-+-----------------------------------------------------------------------+
-|                               core.py                                 |
-|   Motore algoritmico in memoria (UTF-8 str): rolling hash 61-bit,     |
-|   memoizzazione O(1) blocchi, selezione greedy boundary-safe (P1.5),  |
-|   chunking atomico protetto (P0.2), verifica roundtrip esatta (P0.1)  |
-+-----------------------------------+-----------------------------------+
-                                    |
-                                    v
-+-----------------------------------------------------------------------+
-|                              io_utils.py                              |
-|   Persistenza atomica transazionale (mkstemp + os.replace),           |
-|   streaming memory-bounded su file grandi, hashing SHA-256 a 64 KB    |
-+-----------------------------------------------------------------------+
++---------------------------------------------------------------------------------+
+|                                    cli.py                                       |
+|  Orchestrazione CLI, profili (aggressive/semantic/lossless), routing streaming  |
+|  (stdout vs stderr), gestione envelope P4.3, exit codes dedicati (0, 1, 2)      |
++--------+------------------+-------------------+-------------------+-------------+
+         |                  |                   |                   |
+         v                  v                   v                   v
++----------------+  +---------------+  +-----------------+  +---------------------+
+|  minifiers.py  |  |  mapping.py   |  | placeholders.py |  |    tokenizer.py     |
+| Pipeline AST   |  | Serializzatori|  | Alphabet        |  | Backend Tiktoken /  |
+| P1, P3, P4     |  | Positional,   |  | Optimizer, BPE  |  | HuggingFace /       |
+| (Licenze, Log, |  | Delimited, KV,|  | Tier 1 (CJK) e  |  | Heuristic Regex     |
+| Import, Assert)|  | JSON          |  | Tier 2 (Prefix) |  | BPE a 0 dipendenze  |
++--------+-------+  +-------+-------+  +--------+--------+  +----------+----------+
+         |                  |                   |                      |
+         +------------------+---------+---------+----------------------+
+                                      |
+                                      v
++---------------------------------------------------------------------------------+
+|                                    core.py                                      |
+|  Rabin-Karp 64-bit substring rolling hash, Sliding Block Discovery 60-bit O(1), |
+|  selezione greedy boundary-safe O(log K), applicazione token, verifica esatta   |
+|  roundtrip (P0.1) e chunking atomico boundary-aware (P0.2)                      |
++-------------------------------------+-------------------------------------------+
+                                      |
+                                      v
++---------------------------------------------------------------------------------+
+|                                  io_utils.py                                    |
+|  Persistenza atomica transazionale (mkstemp + os.replace), streaming su heap    |
+|  senza duplicazione (os.fdopen), hashing SHA-256 bufferizzato a 64 KB           |
++-------------------------------------+-------------------------------------------+
+                                      |
+       +------------------------------+------------------------------+
+       v                                                             v
++-----------------------------+              +------------------------------------+
+|        benchmark.py         |              |           test_suite.py            |
+| Suite di ablazione P0-P2    |              | 30 test unitari automatizzati      |
+| scoring token cl100k/o200k  |              | validazione di integrità P0,P1,P2, |
+| su corpus reali             |              | P3, P4 e regressione               |
++-----------------------------+              +------------------------------------+
 ```
 
 ---
 
-## 2. Modulo `io_utils.py`: Persistenza Atomica e Gestione I/O
+## 2. Modello Matematico dei Token (Notazione ASCII Pura)
 
-Il modulo incapsula tutte le interazioni con il sistema operativo e il file system, garantendo la coerenza dei dati e l'assenza di duplicazioni in memoria heap durante l'elaborazione di file di grandi dimensioni.
+L'intero sistema valuta le trasformazioni e le sostituzioni confrontando i token effettivi misurati o stimati. Nessuna formula adotta notazioni LaTeX o simboli non presenti sulla tastiera ASCII standard.
 
-### 2.1 Contratti delle Funzioni
-
-#### `ensure_dir(path: PathLike) -> None`
-* **Comportamento**: Crea ricorsivamente la directory genitore o di destinazione se non esiste (`mkdir(parents=True, exist_ok=True)`). Operazione idempotente.
-
-#### `read_text(path: PathLike, encoding: str = "utf-8", errors: str = "strict") -> str`
-* **Comportamento**: Apre e decodifica il file come testo in modalità standard `r`.
-
-#### `read_bytes(path: PathLike) -> bytes`
-* **Comportamento**: Restituisce il contenuto binario grezzo del file.
-
-#### `write_atomic(path: PathLike, data: Union[str, bytes], encoding: str = "utf-8") -> None`
-* **Architettura di Atomicità**:
-  1. Identifica la directory genitore `p.parent` e genera un file temporaneo univoco tramite `tempfile.mkstemp(prefix=p.name + ".", dir=str(p.parent))`. La creazione nella stessa cartella garantisce che il file temporaneo e il file di destinazione risiedano sullo **stesso filesystem/punto di montaggio**, prerequisito per l'atomicità POSIX di `os.replace`.
-  2. **Memory-Bounding per File Grandi**:
-     * Se `data` è `str`: apre il descrittore in modalità testo `with os.fdopen(fd, "w", encoding=encoding, errors="strict")` e scrive in streaming. **Non effettua `data.encode(...)` preventivo**, evitando di duplicare centinaia di megabyte come oggetto `bytes` in memoria heap.
-     * Se `data` è `bytes`: apre in modalità binaria `with os.fdopen(fd, "wb")`.
-  3. **Flush su Disco**: Esegue `f.flush()` e tenta `os.fsync(f.fileno())` (ignorando eventuali eccezioni su filesystem privi di supporto fsync, come tmpfs in memoria).
-  4. **Sostituzione Atomica**: Esegue `os.replace(tmp_path, str(p))`. Se il processo fallisce prima della sostituzione, il blocco `finally` rimuove il file temporaneo residuo.
-
-#### `sha256_file(path: PathLike, buffer_size: int = 65536) -> str`
-* **Comportamento**: Calcola l'hash SHA256 leggendo a blocchi di **64 KB** (`65536` byte), riducendo di un fattore 8 le chiamate di sistema rispetto a buffer convenzionali da 8 KB.
-
-#### `sha256_text(s: str, encoding: str = "utf-8") -> str`
-* **Comportamento**: Calcola l'hash SHA256 della stringa decodificata in UTF-8.
-
-#### `write_json_atomic(path: PathLike, obj: Any, **json_kwargs: Any) -> None`
-* **Comportamento**: Serializza `obj` in formato JSON (default: `indent=2`, `ensure_ascii=False`) e delega la persistenza atomica a `write_atomic`.
-
----
-
-## 3. Modulo `core.py`: Motore Algoritmico e Regole di Trasformazione
-
-Il modulo opera interamente sul testo in formato stringa UTF-8 (`str`), assumendo coordinate a caratteri semichiuse `[start, end)`.
-
-### 3.1 Scansione e Caricamento
-
-* **`scan_files(input_path: str, exclude_pointless: bool = True) -> List[Dict[str, Any]]`**:
-  * Scansiona file singoli, directory ricorsive o liste testuali.
-  * Esclude file nascosti (`.name.startswith(".")`).
-  * Se `exclude_pointless=True`, scarta per default 36 estensioni binarie/non testuali (`.png`, `.jpg`, `.pdf`, `.zip`, `.exe`, `.so`, `.db`, `.pyc`, ecc.).
-  * Restituisce record `FileMeta`: `{"path": str (risolto assoluto), "size": int (byte), "sha256": str (hex)}`.
-  * Se nessun file valido è reperibile, solleva `RuntimeError("No valid files found in input")`.
-* **`load_contents(file_metas: List[Dict[str, Any]]) -> Dict[str, str]`**:
-  * Carica i file in un dizionario in-memory `Dict[path_assoluto, testo_utf8]`.
-
-### 3.2 Preprocessing: Compressione Righe Vuote (P0.3)
-
-* **`strip_empty_lines_by_extension(contents: Dict[str, str], preserve_exts: Optional[Set[str]] = None) -> Dict[str, str]`**:
-  * Whitelist predefinita: `{".md", ".txt", ".rst", ".html", ".tex", ".adoc", ".org"}`.
-  * Per tutti i formati non in whitelist (codice sorgente `.py`, `.c`, `.java`, dati `.json`, ecc.), scarta ogni riga in cui `line.strip() == ""`.
-  * Preserva invariata l'indentazione e il contenuto di tutte le righe non vuote.
-
-### 3.3 Ricerca Ripetizioni (P1.4, P2.6, P2.7)
-
-* **`_find_substring_candidates(...)`**:
-  * **Rolling Hash Rabin-Karp**: Opera su finestre di lunghezza fissa `L_min` con aritmetica a 61 bit (`base = 257`, `mod = 2**61 - 1`).
-  * **Indice Compatto a 64 Bit (P2.7)**: L'indice mappa `hash -> List[int]`. Ciascuna occorrenza è codificata come intero scalare:
-    `packed = (file_id << 32) | offset`
-    dove `file_id < 2**32` e `offset < 2**32`. Riduce di oltre il 60% il consumo di RAM eliminando tuple e puntatori a stringa.
-  * **Anti-Collisione Preliminare (P1.4)**: Per ciascun bucket con cardinalità `>= N_min`, le occorrenze vengono raggruppate per stringa esatta della finestra iniziale:
-    `contents[path][start : start + L_min]`
-    garantendo che solo finestre con testo identico al 100% vengano espanse.
-  * **Invariante di Espansione Sincronizzata (P1.4)**:
-    Dato il seed a coordinate `(seed_path, seed_start)` ed ogni occorrenza `(path, start)`:
-    * Sinistra: `t[start - 1 - k] == seed_text[seed_start - 1 - k]` per `k >= 0`.
-    * Destra: `t[start + L_min + m] == seed_text[seed_start + L_min + m]` per `m >= 0`.
-    L'estensione viene vincolata alla minima comune denominatrice:
-    `common_left = min(k_left_i)`
-    `common_right = min(k_right_i)`
-    con limite `L_min + common_left + common_right <= L_max`.
-    Ogni occorrenza registrata ha lunghezza e contenuto identici a `seed_text[content_start:content_end]`.
-
-* **`_find_block_candidates(...)`**:
-  * **Memoizzazione O(1) degli Offset (P2.6)**: Esegue `splitlines(keepends=True)` una sola volta per file e genera l'array cumulativo:
-    `file_offsets[file_id] = [0, len(l0), len(l0)+len(l1), ...]`
-  * Analizza finestre fisse di righe `{B_min_lines, (B_min_lines + B_max_lines) // 2, B_max_lines}`.
-  * Ricava `start = file_offsets[file_id][li]` ed `end = file_offsets[file_id][li + size]` in tempo costante **O(1)**.
-  * Memorizza nell'indice solo tuple leggere `(file_id, li, size)` senza duplicare le stringhe dei blocchi.
-
-### 3.4 Selezione Sostituzioni con Filtro Singola Occorrenza (P1.5)
-
-* **`select_replacements(...)`**:
-  * **Formula di Valutazione**:
-    `saving_per_occ = max(0, len(content) - ph_len)`
-    `total_saving = saving_per_occ * (len(occs) - 1)`
-  * **Tie-Breaker Deterministico**: Ordina decrescente per `(-total_saving, -len(content), id_hash)`.
-  * **Filtro Greedy a Singola Occorrenza**:
-    Se un'occorrenza di un candidato si sovrappone a un intervallo già approvato, **viene scartata solo quella singola occorrenza**, mantenendo tutte le altre valide.
-  * **Ricalcolo Dinamico**:
-    `recomputed_saving = saving_per_occ * (len(valid_occs) - 1)`
-    Il candidato è ammesso solo se `len(valid_occs) >= 2` e `recomputed_saving >= min_total_saving`.
-  * **Ricerca Binaria O(log K)**: La verifica di overlap `_has_interval_overlap` usa `bisect.bisect_right` con chiave `x[1]` (coordinate di fine intervallo) su liste ordinate, garantendo tempi logaritmici anche su decine di migliaia di sostituzioni.
-
-### 3.5 Applicazione Placeholder e Reverse Map
-
-* **`apply_placeholders(...)`**:
-  * Ordina per ciascun file le sostituzioni per indice `start` crescente.
-  * Ricostruisce il testo compresso concatenando le porzioni originali invariate e i token (`§§s001§§`, `§§b001§§`).
-  * Popola `reverse_map["placeholders"][token]`. Calcola SHA256 e metadati **una sola volta per token univoco** tramite guardia `if token not in reverse_map["placeholders"]:`.
-
-### 3.6 Verifica di Integrità: Exact Roundtrip (P0.1)
-
-* **`roundtrip_check(target_contents: Dict[str, str], llm_ready: Dict[str, str], reverse_map: Dict[str, Any]) -> Tuple[bool, List[str]]`**:
-  * **Verifica Matematica di Reversibilità**:
-    Per ogni file compresso, riapplica la sostituzione inversa ordinando i token per lunghezza decrescente (`_reconstruct_using_tokens`).
-  * **Criteri di Conformità**:
-    1. Nessun token residuo non risolto nel testo ricostruito.
-    2. Nessun token usato nei file ma assente nella mappa.
-    3. **Uguaglianza esatta carattere per carattere**:
-       `recon == target_contents[path]`
-  * **Diagnostica di Errore**: In caso di mancata uguaglianza, calcola l'indice esatto `mismatch_idx` del primo carattere difforme ed estrae le porzioni di contesto circostante (`Expected` vs `Recon`) delimitate con `repr()` per visualizzare caratteri invisibili o spazi difformi.
-
-### 3.7 Chunking Atomico Boundary-Aware (P0.2)
-
-* **`chunk_outputs(...)`**:
-  * **Mappa degli Intervalli Protetti**: Traccia tutti gli intervalli `[ph_start, ph_end)` occupati dai placeholder nel testo compresso.
-  * **Vincolo Atomico**: Se il limite `curr + chunk_size` cade internamente a un placeholder (`ph_start < target_cut < ph_end`), il punto di taglio indietreggia forzatamente a `cut = ph_start`.
-  * **Backtracking su Newline**: Cerca a ritroso l'ultimo delimitatore `\n` in `(curr, cut]`. Se presente (e non interno a un token), sposta il taglio a `cut = nl_pos + 1`.
-  * **Prevenzione Stallo**: Se un singolo blocco indivisibile o una riga eccede `chunk_size`, forza l'avanzamento minimo senza entrare in loop infinito.
-  * **Albero Directory**: I chunk vengono scritti in `OUT_DIR/chunks/<rel_path>/0001.txt`, `0002.txt`.
-
-### 3.8 Metriche di Risparmio Reale e Stima Token LLM (P3.8)
-
-* **`estimate_savings(...)`**:
-  * Formule esatte:
-    * `gross_saved_chars = orig_total - new_total`
-    * `gross_saved_pct = (gross_saved_chars / orig_total) * 100.0`
-    * `net_saved_chars = orig_total - (new_total + mapping_size)`
-    * `net_saved_pct = (net_saved_chars / orig_total) * 100.0`
-    * `orig_tokens_est = int(round(orig_total / chars_per_token))`
-    * `new_tokens_est = int(round(new_total / chars_per_token))`
-    * `mapping_tokens_est = int(round(mapping_size / chars_per_token))`
-    * `net_saved_tokens = orig_tokens_est - (new_tokens_est + mapping_tokens_est)`
-  * Il parametro `chars_per_token` ha valore predefinito pari a `4.0` (standard de-facto empirico per codice e testo).
-
----
-
-## 4. Modulo `cli.py`: Flusso di Esecuzione, Contratti e Ciclo di Vita
-
-Il file `cli.py` funge da punto d'ingresso principale e controlla le transizioni di stato della pipeline.
-
-### 4.1 Tabella Parametri CLI
-
-| Flag | Tipo | Default | Descrizione Tecnica |
-| :--- | :--- | :--- | :--- |
-| `--input, -i` | String | *Obbligatorio* | Percorso directory radice o file-lista contenente i target. |
-| `--output, -o` | String | `compressed_output` | Percorso directory di destinazione dell'output. |
-| `--L_min` | Integer | `64` | Lunghezza minima della finestra di rolling hash substring. |
-| `--N_min` | Integer | `2` | Frequenza minima di occorrenza per i candidati substring. |
-| `--B_min_lines`| Integer | `5` | Numero minimo di righe per candidati blocco. |
-| `--B_max_lines`| Integer | `20` | Numero massimo di righe per candidati blocco. |
-| `--min_total_saving` | Integer | `100` | Soglia minima di caratteri risparmiati per ammettere un placeholder. |
-| `--placeholder-sub` | String | `§§s{:03d}§§` | Maschera di formattazione per placeholder substring. |
-| `--placeholder-blk` | String | `§§b{:03d}§§` | Maschera di formattazione per placeholder blocco. |
-| `--keep-empty-lines` | Flag | `False` | Preserva le righe vuote in tutti i file (disattiva il preprocessing lossy P0.3). |
-| `--verify-roundtrip` | Flag | `False` | Attiva la verifica esatta di uguaglianza stringa post-compressione (P0.1). |
-| `--no-export-mapping` | String opz. | `None` | Gestisce l'esportazione di `mapping_subset.json` (vedi sez. 4.2). |
-| `--export-manifest` | Flag | `False` | Genera `manifest.json` compatto della struttura file e placeholder. |
-| `--chunk-output` | Flag | `False` | Attiva la generazione dei chunk boundary-aware in `OUT_DIR/chunks/`. |
-| `--chunk-size` | Integer | `16000` | Dimensione nominale massima di ciascun chunk in caratteri. |
-| `--include-pointless`| Flag | `False` | Disabilita il filtro di scansione sulle estensioni binarie. |
-
-### 4.2 Regola di Esclusione `--no-export-mapping`
-
-La gestione del flag segue una logica a tre stati:
-1. **Flag assente (`None`)**: Include tutti i file processati in `mapping_subset.json`.
-2. **Flag presente senza valore (`""`)**: Disabilita totalmente l'esportazione (nessun `mapping_subset.json` scritto).
-3. **Flag presente con valore stringa (es. `"f1.py,dir/f2.py"`)**: Parsa una lista separata da virgole di percorsi relativi da escludere, esportando il mapping per tutti i file rimanenti.
-
-### 4.3 Macchina a Stati della Pipeline CLI
+### 2.1 Bilancio Sovrano di Risparmio di Contesto
+Dati il testo originale $T_{orig}$ e il payload compresso $T_{comp}$:
 
 ```text
-[1. Scan Files] ---> [2. Load Contents] ---> [2b. Strip Empty Lines (Default)]
-                                                             |
-+------------------------------------------------------------+
-|
-v
-[3. Find Repetitions] ---> [4. Select Replacements] ---> [5. Apply Placeholders]
-                                                                   |
-+------------------------------------------------------------------+
-|
-v
-[6. Atomic Write Outputs] ---> Scrittura file compressi e reverse_map.json
-[6b. Export Mapping Subset] -> Scrittura mapping_subset.json
-[6c. Export Manifest] -------> Scrittura manifest.json (opzionale)
-[6d. Chunk Outputs] ---------> Scrittura chunks/ e chunks/manifest.json (opzionale)
-                                 |
-+--------------------------------+
-|
-v
-[7. Verify Roundtrip (Opzionale)]
-   |---> OK: continua
-   |---> FAIL: scrive roundtrip_failures.json ed esce con EXIT CODE 2
-|
-v
-[8. Report Savings] ---------> Calcolo metriche reali e stampa a terminale
-|
-v
-EXIT CODE 0
+tokens_payload = count_tokens(T_{comp})
+tokens_mapping = count_tokens(mapping_payload)
+tokens_protocol = count_tokens(protocol_header) + count_tokens(envelope_text)
+
+net_tokens_saved = tokens(T_{orig}) - (tokens_payload + tokens_mapping + tokens_protocol)
+net_compression_ratio = ((net_tokens_saved) * 100.0) / (tokens(T_{orig}))
 ```
 
-### 4.4 Codici di Uscita (Exit Codes)
+Se `net_tokens_saved <= 0`, la trasformazione o la sostituzione viene rigettata in quanto introduce sovraccarico (token penalty) all'interno del context window dell'LLM.
 
-* **`0` (SUCCESS)**: Esecuzione completata correttamente. Tutti gli output richiesti sono stati scritti e l'eventuale verifica di roundtrip è passata al 100%.
-* **`1` (FATAL / I/O ERROR)**: 
-  * Percorso di input non esistente.
-  * Nessun file valido rilevato dallo scanner.
-  * Eccezione non gestita o fallimento di scrittura atomica in `_write_outputs`.
-* **`2` (ROUNDTRIP INTEGRITY FAILURE)**:
-  * Il controllo `--verify-roundtrip` ha rilevato una discrepanza tra il testo ricostruito e il target pre-compressione.
-  * Salva il report analitico in `OUT_DIR/roundtrip_failures.json` prima di terminare.
+### 2.2 Guadagno Marginale per Singolo Candidato di Deduplicazione
+Dato un pattern candidato con $N$ occorrenze nel corpus, contenuto $C$, placeholder assegnato $P$, costo marginale di rappresentazione nel dizionario $M_{cost}$ e delta di overhead del protocollo $D_{proto}$:
+
+```text
+candidate_net_gain = N * (tokens(C) - tokens(P)) - M_{cost} - D_{proto}
+```
+
+Nelle architetture con dizionario globale ammortizzato (P1.3):
+- $M_{cost}$ viene addebitato una sola volta per l'intero repository, ammortizzandosi su tutte le $N$ occorrenze complessive distribuite tra i vari file.
+- Nel formato `PositionalMappingSerializer`, $tokens(P) = 0$ all'interno del mapping poiché le chiavi sono omesse e dedotte per indice ordinale.
+
+### 2.3 Modello di Allineamento Euristico del Tokenizzatore
+Dati $n$ campioni di calibrazione tra tokenizzatore euristico a zero dipendenze e tokenizzatore reale di riferimento:
+
+```text
+error_pct_i = ((abs(tokens_heuristic_i - tokens_real_i)) * 100.0) / (tokens_real_i)
+mean_error_pct = (sum(i=1 to n, error_pct_i)) / (n)
+
+diff_i = tokens_heuristic_i - tokens_real_i
+bar_D = (sum(i=1 to n, diff_i)) / (float(n))
+variance_D = (sum(i=1 to n, (diff_i - bar_D) * (diff_i - bar_D))) / (float(n - 1))
+s_D = sqrt(variance_D)
+margin_95 = (1.96 * s_D) / (sqrt(float(n)))
+CI_95 = [bar_D - margin_95, bar_D + margin_95]
+```
 
 ---
 
-## 5. Schemi Formali degli Output JSON
+## 3. Specifiche di Modulo e Contratti di Interfaccia
 
-### 5.1 `reverse_map.json` (Registro di Ripristino Completo)
-Percorso: `OUT_DIR/reverse_map.json`
+### 3.1 `minifiers.py`: Pipeline di Canonicalizzazione e Compattazione (P1, P3, P4)
+
+Il modulo implementa trasformazioni del codice a livello AST (Abstract Syntax Tree) e tramite pattern matching per eliminare il testo superfluo prima dell'indicizzazione delle ripetizioni.
+
+#### Contratti Principali
+- **`strip_license_header(code: str, ext: str) -> str` (P3.1)**:
+  - Scansiona le prime 40 righe di codice sorgente (.py, .sh, .js, .ts, .c, .cpp, .go, .rs).
+  - Preserva intatto lo shebang iniziale (`#!/...`) se presente alla riga 0.
+  - Rimuove blocchi C-style (`/* ... */`) o sequenze di commenti mono-riga (`#`, `//`) contenenti match case-insensitive con l'espressione:
+    `LICENSE_KEYWORDS_RE = re.compile(r"(?:copyright\s+(?:\(c\)|©|\d{4})|license|spdx-license-identifier|all rights reserved)", re.IGNORECASE)`
+  - Se non viene rilevato alcun pattern di licenza, restituisce il codice originale invariato.
+
+- **`minify_bash(code: str, remove_comments: bool = True, remove_ansi: bool = True) -> str` (P1.1)**:
+  - Preserva tassativamente lo shebang alla prima riga.
+  - Rimuove sequenze di escape ANSI tramite:
+    `ANSI_ESCAPE_RE = re.compile(r"(?:\x1b|\033|\\e|\\033|\\x1b)\[[0-9;]*[a-zA-Z]")`
+  - Rimuove commenti a riga intera (`stripped.startswith("#")`), lasciando inalterati i commenti inline e le stringhe virgolettate per non alterare l'espansione shell.
+  - Collassa sequenze di righe vuote multiple in una singola riga vuota.
+
+- **`minify_markdown(doc: str, compact_tables: bool = True, remove_badges: bool = True) -> str` (P1.2)**:
+  - Riconosce i code fence Markdown (` ``` `) e ne sospende qualsiasi manipolazione interna per non corrompere blocchi di codice incapsulati.
+  - Elimina link e immagini di badge grafici (shields.io, badgen.net, codecov, workflow GitHub Actions) sia in formato Markdown che HTML.
+  - Compatta le tabelle Markdown eliminando gli spazi di allineamento visivo interni alle celle (`| col1 | col2 |` anziché `|   col1        |   col2   |`), preservando i delimitatori di allineamento (`:---:`).
+
+- **`minify_python(...) -> str` (P1.1, P3.2, P4.1, P4.2)**:
+  - Riceve il codice Python e ne genera l'AST (`ast.parse(code)`). In caso di errore sintattico di parsing, restituisce il codice originale intatto.
+  - **`_DocstringStripper`**: Rimuove module, class e function docstrings. Sostituisce il corpo con `pass` qualora la docstring fosse l'unica istruzione del blocco.
+  - **`_TypeAnnotationStripper`**: Rimuove le type annotations PEP 484/526 dagli argomenti delle funzioni, dal tipo di ritorno e trasforma `AnnAssign` (`x: int = 5`) in assegnazioni standard (`x = 5`), cancellando le annotazioni prive di valore (`x: int`).
+  - **`_ErrorAndLogStringCompactor` (P3.2)**: Trasforma messaggi di eccezione verbose (`raise ValueError("very long explanatory string...")`) in token compatti (`raise ValueError("ERR")`) e compila le chiamate di log verbose (`logger.info("...")`) in `logger.info("LOG")` se il testo supera gli 8 caratteri.
+  - **`_AssertPruner` (P4.2)**: Rimuove totalmente i nodi `ast.Assert` in modalità aggressiva.
+  - **`_UsedNamesCollector` & `_UnusedImportPruner` (P4.1)**:
+    - Raccoglie tutti i nomi con contesto `Load` nell'AST (compresi decoratori, classi base e tuple `__all__`).
+    - Pota da `ast.Import` e `ast.ImportFrom` gli alias e i moduli non referenziati nel codice a runtime.
+    - Preserva tassativamente gli import `__future__` e i wildcard import (`*`).
+    - Rimuove integralmente le classi del modulo `typing` (`List`, `Dict`, `Optional`, `Union`) non più referenziate dopo lo stripping delle annotazioni di tipo.
+  - **`_LocalScopeAnalyzer` & `_LocalRenamer` (P1.1)**: Analizza lo scope di funzioni e metodi; se la funzione non invoca funzioni di riflessione (`eval`, `exec`, `locals`, `globals`, `vars`, `getattr`, `setattr`), rinomina in modo conservativo le variabili strettamente locali più lunghe di 3 caratteri in `_v1`, `_v2`, ecc.
+  - **`_EmptyBodyFixer`**: Visita tutti i blocchi sintattici (`body`, `orelse`, `finalbody`) e inietta `pass` se lo svuotamento da asserzioni o import ha reso vuoto il blocco.
+  - Rigenera il sorgente con `ast.unparse(tree)` e valida l'integrità del codice risultante tramite `compile(code, "<minified>", "exec")`.
+
+- **`minify_json(code: str) -> str` & `minify_yaml(code: str) -> str` (P3.4)**:
+  - JSON: deserializzazione e ricompattazione priva di spazi (`separators=(",", ":")`).
+  - YAML: eliminazione commenti mono-riga (`#`) e collasso righe vuote nel rispetto dell'indentazione.
+
+---
+
+### 3.2 `placeholders.py`: Alphabet Optimizer & Protocol Metadata (P2.3)
+
+Gestisce la generazione e calibrazione dinamica dell'alfabeto dei token di sostituzione, garantendo l'assenza di collisioni e il minor costo in token BPE.
+
+#### Stili di Placeholder Disponibili
+1. **`single_token` (Tier 1 Default)**: Caratteri ideografici CJK Unificati (range `\u4e00-\u9fff`, base `0x4E00` = `一`). Ciascun carattere occupa **esattamente 1 token** nei modelli BPE cl100k, o200k e LLaMA. Dimensione pool: 2.500 simboli.
+2. **`prefix_compact` (Tier 2 Spillover)**: Prefisso asimmetrico seguito da intero (`^1`, `^2` o `~1`, `~2`). Occupa **esattamente 2 token**.
+3. **`guillemet`**: Virgolette caporali francesi (`«1»`, `«2»`). Occupa 3 token.
+4. **`classic`**: Delimitatori baseline legacy a 4 token (`__s1__`, `__b1__`).
+5. **`section` (`§1§`)**, **`bracket` (`⟦1⟧`)**, **`ascii_compact` (`~1~`)**: Formati ausiliari a 3 token.
+
+#### Algoritmo di Allocazione e Spillover
+1. **Calibrazione Automatica (`auto_calibrate`)**: Ispeziona il corpus di input `raw_corpus`. Se almeno 90 dei primi 100 caratteri CJK di Tier 1 sono totalmente assenti dal testo originale, elegge `single_token`. Altrimenti seleziona lo stile a minor costo medio tra `prefix_compact` e `guillemet`.
+2. **Costruzione dell'Alfabeto (`build_alphabet`)**:
+   - Esclude ogni singolo carattere presente nel corpus.
+   - Alloca per primi i simboli CJK atomici a 1 token (Tier 1).
+   - Se il fabbisogno di sostituzioni eccede la capienza di Tier 1, attiva lo spillover ibrido in Tier 2 (`^1`, `^2`, ...).
+   - Raggruppa i codepoint in intervalli contigui:
+     `ranges = [(start_1, end_1), (start_2, end_2), ...]`
+3. **Finalizzazione (`finalize_used_alphabet`)**: Al termine della fase greedy, riduce l'alfabeto attivo strettamente ai token effettivamente impiegati nei file compressi e genera il descrittore di protocollo `get_protocol_meta()`.
+
+---
+
+### 3.3 `mapping.py`: Serializzatori di Mappatura e Protocollo (P2.3)
+
+Serializza il dizionario delle sostituzioni per la trasmissione all'LLM.
+
+#### 1. `PositionalMappingSerializer` (Default Zero-Key Mapping)
+- **Principio**: Nel corpo del payload memorizza **esclusivamente i contenuti originali** separati da un delimitatore sicuro (sentinel predefinita `\n---§---\n`), omettendo totalmente le chiavi placeholder nel corpo.
+- **Header di Protocollo a Bassissimo Overhead (~8 - ~28 token)**:
+  - **CJK Contiguo**:  
+    `[MAP:INDEXED sentinel='\n---§---\n' cjk_start=19968 count=N]`
+  - **CJK Multi-Range (P2.3)**:  
+    `[MAP:INDEXED sentinel='\n---§---\n' cjk_ranges='19968-20050,20060-20500' count=N]`
+  - **Ibrido CJK + Prefix (P2.3)**:  
+    `[MAP:INDEXED sentinel='\n---§---\n' cjk_ranges='...' prefix='^' p_start=1 p_count=M]`
+  - **Sequenza Prefisso**:  
+    `[MAP:INDEXED sentinel='\n---§---\n' prefix='^' start=1 count=N]`
+  - **Sequenza Template**:  
+    `[MAP:INDEXED sentinel='\n---§---\n' seq='«{:d}»' start=1 count=N]`
+- **Ordinamento di Serializzazione**: Definito da `positional_sort_key`:
+  - Tier 0: Caratteri CJK (ordinati per codepoint).
+  - Tier 1: Prefissi numerici (`^1`, `^2`, ordinati per valore intero).
+  - Tier 2: Simboli singoli generali.
+  - Tier 3: Stringhe e template complessi in ordinamento naturale numerico.
+- **Invariante di Ricostruzione**:  
+  `deserialize(serialize(M, ph_meta)) == M` per qualsiasi dizionario $M$.
+
+#### 2. `DelimitedMappingSerializer`
+Memorizza blocchi `TOKEN\nCONTENUTO` separati da sentinel dinamica priva di collisioni. Preserva ritorni a capo e virgolette grezze senza l'overhead di escaping JSON.
+
+#### 3. `KVMappingSerializer`
+Memorizza `TOKEN=CONTENUTO` riga per riga, compattando i ritorni a capo interni con il marcatore `␤`.
+
+#### 4. `JSONMappingSerializer`
+Serializzazione standard `json.dumps(mapping, ensure_ascii=False, separators=(",", ":"))`. Utilizzato come riferimento baseline di confronto nei benchmark.
+
+---
+
+### 3.4 `core.py`: Motore Algoritmico e Pipeline di Deduplicazione
+
+#### 3.4.1 Rilevamento Ripetizioni Multi-Granularità
+1. **Identificatori e Parole (`_find_word_candidates`)**: Regex `\b[A-Za-z_][A-Za-z0-9_]{5,}\b`. Rileva parole con lunghezza `>= 6` e frequenza `>= 3`.
+2. **Rabin-Karp Substring Rolling Hash (`_find_substring_candidates`)**:
+   - Finestra di scansione `L_min` caratteri.
+   - Parametri rolling hash: `base = 257`, `mod = 2**61 - 1`.
+   - Indice compatto a 64 bit:
+     `packed_coordinate = (file_id << 32) | start_offset`
+   - Bucket raggruppati per stringa esatta della finestra iniziale.
+   - **Espansione Sincronizzata Birezionale**: Calcola `common_left` e `common_right` estendendo contemporaneamente tutte le occorrenze rispetto alla stringa seed finché tutti i caratteri coincidono, entro il tetto `L_max`.
+3. **Dynamic Sliding Block Discovery (`_find_block_candidates` - P2.2)**:
+   - Scansiona finestre parametriche di righe intere da `B_max_lines` a `B_min_lines`.
+   - Pre-computa gli offset di riga cumulativi `file_offsets[file_id]` per ricavare coordinate in tempo **O(1)**.
+   - State machine rolling hash su righe con base a 60 bit:
+     `base = 1000003`, `mod = 2**61 - 1`
+   - Calcolo rolling window per riga in tempo O(1):
+     `h = ((h - hash_prev * power) * base + hash_next) % mod`
+   - Verifica stringa esatta del blocco prima di confermare il candidato.
+
+#### 3.4.2 Selezione Greedy con Risoluzione Overlap O(log K) (`select_replacements`)
+- I candidati vengono pre-valutati:
+  `tok_gain = N * (tok_content - tok_ph) - tok_map`
+  dove `tok_map` è conteggiato una sola volta a livello di repository.
+- Ordinamento deterministico: per `tok_gain` decrescente, poi per frequenza $N$ decrescente, poi per lunghezza contenuto decrescente, infine per hash SHA-256.
+- Controllo collisioni: durante l'allocazione, se un placeholder è già presente nel testo originale, l'Alphabet Optimizer avanza al simbolo successivo.
+- Risoluzione sovrapposizioni (`_has_interval_overlap`):
+  Utilizza `bisect.bisect_right` con chiave di ricerca sulla coordinata di fine intervallo `end` su liste mantenute ordinate tramite `bisect.insort`. Complessità temporale: **O(log K)** per verifica, con $K$ intervalli occupati nel file.
+- Se un'occorrenza si sovrappone a un blocco prioritario precedentemente assegnato, **viene scartata solo la singola occorrenza sovrapposta**. Il pattern viene mantenuto se il numero residuo di occorrenze valide $N_{valid} >= 2$ continua a generare un guadagno netto positivo.
+
+#### 3.4.3 Applicazione Placeholder e Protezione dei Confini (`apply_placeholders`)
+- Sostituisce le occorrenze valide nel testo da sinistra verso destra.
+- **Digit Boundary Guard**: Per i prefissi asimmetrici che terminano con cifra (es. `^1`, `^2`), impedisce la sostituzione se il carattere successivo nel testo originale è una cifra numerica (`text[e].isdigit()`), evitando la fusione ambigua del token (es. `^1` seguito da `5` che verrebbe letto come `^15`).
+- Genera il dizionario strutturato `reverse_map`.
+
+#### 3.4.4 Verifica Roundtrip Reversibile Esatta (`roundtrip_check` - P0.1)
+- Verifica che per ogni file valga rigorosamente:
+  `reconstruct(llm_ready[path]) == target_contents[path]`
+- I token vengono ordinati per lunghezza decrescente (`tokens_sorted = sorted(keys, key=len, reverse=True)`).
+- Applica una regex a lookahead negativo `(?!\d)` per i prefissi aperti a cifra, garantendo che prefissi più brevi non consumino parzialmente prefissi più lunghi.
+- Se viene rilevata anche una sola discordanza di un carattere, calcola l'offset `mismatch_idx`, genera il dump del contesto atteso rispetto al ricostruito, crea `roundtrip_failures.json` e forza l'interruzione con codice di uscita `2`.
+
+#### 3.4.5 Chunking Atomico Boundary-Aware (`chunk_outputs` - P0.2)
+- Se `--chunk-output` è attivo, suddivide i file compressi in frammenti con dimensione nominale massima `--chunk-size` (default 16.000 caratteri).
+- **Protezione Boundary-Aware**: Mappa tutti i token di placeholder presenti nel testo. Se il target cut cade all'interno di un token (`s_start < target_cut < s_end`), arretra istantaneamente l'indice di taglio a `s_start`.
+- **Backtracking su Newline**: All'interno dello span consentito, arretra all'ultimo ritorno a capo `\n` che non intersechi un token protetto.
+- Scrive i chunk in `chunks/<rel_path>/0001.txt`, `0002.txt` e genera `chunks/manifest.json`.
+
+---
+
+### 3.5 `tokenizer.py`: Backend di Tokenizzazione e Calibrazione BPE
+
+#### Backend Supportati
+1. **`TiktokenBackend`**: Supporto diretto a `cl100k_base` (GPT-4), `o200k_base` (GPT-4o), `p50k_base`.
+2. **`HuggingFaceBackend`**: Supporto per tokenizzatori LLaMA 3, Qwen, Mistral tramite pacchetto `transformers`.
+3. **`HeuristicBackend` (Zero Dipendenze)**:
+   Implementa un pattern regex che riproduce con fedeltà `>= 95%` le regole di pre-tokenizzazione BPE standard:
+   - Contrazioni inglesi (`'s`, `'t`, `'re`, `'ve`, `'m`, `'ll`, `'d`).
+   - Caratteri CJK Unificati atomici: `[\u4e00-\u9fff]` contati rigorosamente come **1 token ciascuno**.
+   - Ritorni a capo con indentazione associata: `\r?\n[ \t]*`.
+   - Parole alfabetiche con eventuale spazio iniziale (CamelCase, lowercase runs fino a 12 caratteri contate come 1 token).
+   - Raggruppamenti numerici fino a 3 cifre: ` ?[0-9]{1,3}`.
+   - Run di spazi fino a 4: `[ ]{1,4}`.
+   - Token alfanumerici lunghi o hash spezzati su blocchi di 4 caratteri.
+
+---
+
+### 3.6 `cli.py`: Orchestratore e Contratti di Esecuzione
+
+#### 3.6.1 Modalità Operative Primarie (`--mode`)
+- **`--mode aggressive` (Default)**:
+  Attiva l'intero spettro di canonicalizzatori e compattatori:
+  - Rimozione licenze (P3.1)
+  - Compattazione errori e log (P3.2)
+  - Pruning import inutilizzati e typing (P4.1)
+  - Pruning asserzioni (P4.2)
+  - Stripping commenti, docstring e tipi PEP 484/526
+  - Minificazione Bash, Markdown, JSON e YAML
+  - Ridenominazione locali AST
+  - Normalizzazione indentazione (4 spazi -> tab)
+  - Eliminazione righe vuote nel codice
+  - Preset tuning: `aggressive` (`L_min=10`, `min_total_saving=1`)
+- **`--mode semantic`**:
+  Preserva la semantica funzionale runtime:
+  - Attiva stripping commenti, docstring, annotazioni di tipo, tabelle, badge e potatura import inutilizzati.
+  - **Disattiva** la compattazione stringhe di errore e il pruning delle asserzioni diagnostiche.
+  - Preset tuning: `code-max` (`L_min=14`, `min_total_saving=2`).
+- **`--mode lossless`**:
+  Decompressione identica al byte su tutti i file:
+  - Disattiva tutti i minificatori e le trasformazioni AST.
+  - Preserva ogni singolo spazio e riga vuota (`keep_empty_lines = True`).
+  - Esegue esclusivamente deduplicazione reversibile con mapping posizionale o specificato.
+
+#### 3.6.2 Streaming e LLM Prompt Envelope (P3.3, P4.3)
+- **`-i -`**: Lettura del codice sorgente da standard input pipe Unix.
+- **`--stdout`**: Emissione dell'output compresso direttamente su `sys.stdout`. I messaggi diagnostici, log e report sui token vengono automaticamente reindirizzati su `sys.stderr`.
+- **`--envelope, -e`**: Incapsula lo stream di output all'interno di un envelope ottimizzato per LLM:
+  ```text
+  <context>
+  [LLM-READY COMPRESSED CONTEXT - chunk-compress v3.4.0]
+  [INSTRUCTION: Expand placeholders using mapping dictionary before execution or analysis.]
+  (protocol header)
+  (mapping payload)
+  (file compresso o stream multi-file)
+  </context>
+  ```
+
+#### 3.6.3 Codici di Uscita (Exit Codes)
+- **`0`**: Esecuzione completata con successo. Output scritti e roundtrip verificato.
+- **`1`**: Errore fatale di input/output (file non trovato, permessi negati, eccezione irreversibile).
+- **`2`**: Violazione di integrità roundtrip (`roundtrip_check` fallito).
+
+---
+
+## 4. Schemi Formali di Persistenza e Output
+
+### 4.1 `mapping_subset.txt` & `protocol_header.txt` (Default Positional)
+- **`protocol_header.txt`**:
+  ```text
+  [MAP:INDEXED sentinel='\n---§---\n' cjk_start=19968 count=3]
+  ```
+- **`mapping_subset.txt`**:
+  ```text
+  def calculate_hash(data):
+      return hashlib.sha256(data).hexdigest()
+  ---§---
+  validate_session(token)
+  ---§---
+  https://api.internal/v1/stream
+  ```
+
+### 4.2 `reverse_map.json` (Registro di Ripristino Globale)
 ```json
 {
   "placeholders": {
-    "§§s001§§": {
-      "type": "substring",
-      "content": "def calculate_loss(y_true, y_pred):\n    return np.mean((y_true - y_pred) ** 2)\n",
+    "一": {
+      "type": "block",
+      "content": "def calculate_hash(data):\n    return hashlib.sha256(data).hexdigest()\n",
       "sha256": "8f3b...12c4",
       "length": 75,
       "occurrences": [
-        {"path": "/abs/project/models/dense.py", "start": 340, "end": 415},
-        {"path": "/abs/project/models/conv.py", "start": 890, "end": 965}
+        {"path": "/abs/project/src/auth.py", "start": 340, "end": 415},
+        {"path": "/abs/project/src/api.py", "start": 890, "end": 965}
       ],
-      "token": "§§s001§§",
-      "id": "S:001"
+      "token": "一",
+      "id": "B:1"
     }
   },
+  "ph_meta": {
+    "type": "cjk_contiguous",
+    "start_cp": 19968,
+    "start_char": "一",
+    "count": 1
+  },
   "metadata": {
-    "tool": "chunk_compress"
+    "tool": "chunk_compress",
+    "version": "3.4.0"
   }
 }
 ```
 
-### 5.2 `mapping_subset.json` (Payload di Contesto per LLM)
-Percorso: `OUT_DIR/mapping_subset.json`
-```json
-{
-  "§§s001§§": {
-    "content": "def calculate_loss(y_true, y_pred):\n    return np.mean((y_true - y_pred) ** 2)\n",
-    "sha256": "8f3b...12c4",
-    "length": 75
-  }
-}
-```
-
-### 5.3 `manifest.json` (Struttura di Progetto)
-Percorso: `OUT_DIR/manifest.json`
+### 4.3 `manifest.json` (Indice Strutturale del Repository)
 ```json
 {
   "paths": [
-    "models/dense.py",
-    "models/conv.py"
+    "src/auth.py",
+    "src/api.py"
   ],
   "files": [
-    {"i": 0, "sha": "3a7b...4c2d", "ph": ["§§s001§§"]},
-    {"i": 1, "sha": "5e8d...9f1a", "ph": ["§§s001§§"]}
+    {"i": 0, "sha": "3a7b...4c2d", "ph": ["一"]},
+    {"i": 1, "sha": "5e8d...9f1a", "ph": ["一"]}
   ],
   "ph": {
-    "§§s001§§": {"sha": "8f3b...12c4", "len": 75}
+    "一": {"sha": "8f3b...12c4", "len": 75}
   },
   "v": 1
 }
 ```
 
-### 5.4 `chunks/manifest.json` (Manifest Riassemblaggio Chunk)
-Percorso: `OUT_DIR/chunks/manifest.json`
+### 4.4 `chunks/manifest.json` (Manifest Riassemblaggio Chunk)
 ```json
 {
   "files": {
-    "models/dense.py": {
+    "src/auth.py": {
       "chunks": [
-        "models/dense.py/0001.txt",
-        "models/dense.py/0002.txt"
+        "src/auth.py/0001.txt",
+        "src/auth.py/0002.txt"
       ],
       "sha256_full": "c71a...44e2",
       "chunk_size": 16000,
@@ -342,24 +414,24 @@ Percorso: `OUT_DIR/chunks/manifest.json`
   "v": 1
 }
 ```
-*Nota*: `sha256_full` certifica l'integrità del testo compresso dopo la concatenazione sequenziale dei chunk, prima che il modello o l'interprete esegua la sostituzione inversa dei placeholder.
 
 ---
 
-## 6. Invarianti Formali di Sistema
+## 5. Invarianti Formali di Sistema
 
-1. **Invariante di Disgiunzione degli Intervalli (Non-Overlap)**:
-   Dati due intervalli di sostituzione $I_1 = [s_1, e_1)$ e $I_2 = [s_2, e_2)$ appartenenti allo stesso percorso di file:
-   `e_1 <= s_2` oppure `e_2 <= s_1`
-2. **Invariante di Uguaglianza Sostitutiva**:
-   Data una sostituzione $r$ ed ogni sua occorrenza registrata $o = (path, s, e)$:
-   `target_contents[path][s : e] == r.content`
-3. **Invariante di Atomicità del Taglio (Boundary Safety)**:
-   Dato un punto di taglio chunk $C_{cut}$ e un token protetto $P = [ph_{start}, ph_{end})$:
-   Non può esistere alcuna suddivisione tale per cui:
-   `ph_{start} < C_{cut} < ph_{end}`
-4. **Invariante di Reversibilità Perfetta**:
-   Sia $T$ il testo target derivato (con o senza rimozione righe vuote). Applicando la trasformazione $\text{apply}$ e successivamente la ricostruzione inversa $\text{reconstruct}$ con `reverse_map`:
-   `reconstruct(apply(T)) == T`
-   garantito per qualsiasi combinazione valida di parametri CLI.
+1. **Invariante di Disgiunzione degli Intervalli (Non-Overlap)**:  
+   Per qualsiasi coppia di sostituzioni approvate nello stesso file $I_1 = [s_1, e_1)$ e $I_2 = [s_2, e_2)$:  
+   `e_1 <= s_2` oppure `e_2 <= s_1`.
+2. **Invariante di Uguaglianza Sostitutiva**:  
+   Per ogni sostituzione $r$ ed ogni sua occorrenza valida $o = (path, s, e)$:  
+   `target_contents[path][s : e] == r["content"]`.
+3. **Invariante di Atomicità del Chunking (Boundary Safety)**:  
+   Dato qualsiasi punto di taglio del chunk $C_{cut}$ e un token protetto $P = [ph_{start}, ph_{end})$:  
+   Non può esistere alcuna condizione per cui:  
+   `ph_{start} < C_{cut} < ph_{end}`.
+4. **Invariante di Reversibilità Perfetta**:  
+   Sia $T$ il testo target post-canonicalizzazione. Applicando la trasformazione di sostituzione `apply` e successivamente la decodifica `reconstruct` tramite `reverse_map`:  
+   `reconstruct(apply(T)) == T`.
+5. **Invariante di Ammortamento del Dizionario**:  
+   La quota di token del dizionario associata a una voce di mappatura viene addebitata una sola volta a livello di repository, consentendo a pattern multi-file di ottenere un guadagno netto positivo anche con frequenze individuali basse per singolo file.
 
