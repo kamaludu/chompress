@@ -1,4 +1,4 @@
-[![Chompress](https://img.shields.io/badge/Chompress-00aa55?style=for-the-badge&label=>&labelColor=004d00)](README.md)
+[![Chompress](https://img.shields.io/badge/Chompress-00aa55?style=for-the-badge&label=><&labelColor=004d00)](README.md)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-green.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](#)
 
