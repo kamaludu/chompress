@@ -210,7 +210,7 @@ Esegui tassativamente la procedura:
 3. Se l'hash coincide, conferma l'integrità, espandi i placeholder usando il dizionario e spiegami cosa fa questo modulo.
 ```
 
-*(Nota: puoi trovare i prompt completi già formulati per l'AI nel file `PROMPT.md`).*
+*(Nota: puoi trovare i prompt completi già formulati per l'AI nel file* ***[PROMPT MASTER](PROMPT.md)*** *).*
 
 ---
 
