@@ -6,6 +6,24 @@
 *Licenza: GNU General Public License v3.0 (GPL-3.0-or-later)*  
 *Codice sorgente: https://github.com/kamaludu/chunk-compress*
 
+```text
+chunk-compress/        # Project Structure
+├── LICENSE            # GNU General Public License v3.0 +
+├── PROMPT.md          # Prompt Master
+├── README.md          # Readme & User Guide 
+├── SPEC.md            # System Technical Specification
+├── benchmark.py       # P0 & Alphabet Optimizer Evaluation Harness
+├── cli.py             # Token-Aware CLI Orchestrator
+├── core.py            # Token-Aware Core Pipeline
+├── io_utils.py        # I/O utilities
+├── mapping.py         # Protocol Header Multi-Range Support
+├── minifiers.py       # Semantic Canonicalization & Aggressive Compactor
+├── placeholders.py    # Alphabet Optimizer & Multi-Range Generator
+├── test.sh            # End-to-end integration and smoke-test harness
+├── test_suite.py      # Comprehensive Test Suite for chunk-compress
+└── tokenizer.py       # Tokenizer Heuristic Calibration & BPE Alignment
+```
+
 ---
 
 ## 1. Visione d'Insieme e Gerarchia degli Obiettivi
