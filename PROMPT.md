@@ -1,6 +1,7 @@
-[![Compressore locale LLM‑ready](https://img.shields.io/badge/Compressore_locale_LLM‑ready-00aa55?style=for-the-badge&label=>&labelColor=004d00)](README.md)
 
-# GUIDA AI PROMPT MASTER (v3.4.0)
+[![Chompress](https://img.shields.io/badge/Chompress-00aa55?style=for-the-badge&label=>&labelColor=004d00)](README.md)
+
+# GUIDA - AI PROMPT MASTER (v3.5.0)
 *(Ottimizzato per modelli di ragionamento avanzato: OpenAI o1/o3/GPT-4o, Anthropic Claude 3.5/3.7 Sonnet, Copilot Think Deeper, DeepSeek R1)*
 
 Questa guida definisce i protocolli di comunicazione tra l'utente e il Large Language Model per l'ingestione, la decompressione in memoria e l'analisi del contesto compresso generato da **chompress**.
@@ -26,7 +27,7 @@ Quando si esegue il compressore con l'opzione `--envelope` (o `-e`), l'output è
 ### Prompt da inviare all'AI:
 
 ```text
-(Incolla qui l'intero output generato con il comando: python3 cli.py -i <file> -e)
+(Incolla qui l'intero output generato con il comando: python3 chompress.py -i <file> -e)
 
 --- RICHIESTA OPERATIVA ---
 Ho fornito il contesto del codice compresso racchiuso nel tag <context>.
@@ -95,14 +96,14 @@ Istruzioni:
 ---
 
 ### Stadio 1.3: Inserimento Protocollo e Dizionario di Mappatura
-*(Supporta sia il nuovo Positional Mapping a zero chiavi sia il formato JSON legacy)*
+*(Supporta sia il Positional Mapping a zero chiavi sia il formato JSON legacy)*
 
 ```text
 Questo è il dizionario di mappatura dei placeholder generato da chompress.
 
 Se l'intestazione inizia con [MAP:INDEXED...], interpretalo come mapping posizionale ordinale:
 - L'header indica la regola di generazione dei token (es. caratteri CJK contigui cjk_start=19968 count=N, prefissi numerici prefix='^', o intervalli multipli cjk_ranges).
-- Le voci nel payload sono separate dal marcatore sentinella (es. ---§---).
+- Le voci nel payload sono separate dal marcatore sentinella (es. '§').
 - Ciascuna voce corrisponde esattamente all'n-esimo token generato dalla sequenza del protocollo.
 
 Se l'intestazione è [MAP:JSON], usalo come dizionario JSON standard {token: contenuto}.

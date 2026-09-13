@@ -5,7 +5,7 @@ File: benchmark.py (P0 & Alphabet Optimizer Evaluation Harness)
 Copyright (C) 2026 Cristian Evangelisti
 License: GPL-3.0-or-later
 SPDX-License-Identifier: GPL-3.0-or-later
-Source: https://github.com/kamaludu/chunk-compress
+Source: https://github.com/kamaludu/chompress
 
 Description:
 A/B ablation benchmark harness measuring real LLM token economy for P0:
