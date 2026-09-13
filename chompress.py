@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 Local LLM-ready Compressor (P0, P1, P2, P3 & P4 Token-Aware CLI Orchestrator)
-File: cli.py
+File: chompress.py
 Copyright (C) 2026 Cristian Evangelisti
 License: GPL-3.0-or-later
 SPDX-License-Identifier: GPL-3.0-or-later
-Source: https://github.com/kamaludu/chunk-compress
+Source: https://github.com/kamaludu/chompress
 
 Description:
 Command-line interface orchestrator for LLM context compression:
@@ -46,11 +46,11 @@ import minifiers
 import placeholders as ph_module
 import tokenizer
 
-VERSION = "3.4.1"
+VERSION = "3.5.0"
 
 ENVELOPE_HEADER = (
     "<context>\n"
-    "[LLM-READY COMPRESSED CONTEXT - chunk-compress v3.4.1]\n"
+    "[LLM-READY COMPRESSED CONTEXT - chompress v3.5.0]\n"
     "[INSTRUCTION: Expand placeholders using mapping dictionary before execution or analysis.]\n"
 )
 ENVELOPE_FOOTER = "</context>\n"
@@ -87,13 +87,13 @@ PRESETS: Dict[str, Dict[str, Any]] = {
         "desc": "Balanced profile for markdown docs and specs; requires at least 3 net tokens saved.",
     },
     "aggressive": {
-        "L_min": 10,
+        "L_min": 7,
         "L_max": 2000,
         "N_min": 2,
         "B_min_lines": 2,
         "B_max_lines": 6,
-        "min_total_saving": 1,
-        "desc": "Maximum token reduction; accepts any replacement with positive net token gain.",
+        "min_total_saving": 3,
+        "desc": "Maximum token reduction; captures dense syntactic fragments with net saving threshold 3.",
     },
 }
 
@@ -114,13 +114,13 @@ STREAMING, PIPES & PROMPT ENVELOPE (P3.3 & P4.3):
 
 READY-TO-USE EXAMPLES:
   # 1. Direct LLM context stream via pipe with prompt envelope (zero disk files):
-  cat script.py | python3 cli.py -i - --stdout --envelope
+  cat script.py | python3 chompress.py -i - --stdout --envelope
 
   # 2. Single-file direct compression to prompt context with envelope:
-  python3 cli.py -i service.py --stdout -e > prompt_context.txt
+  python3 chompress.py -i service.py --stdout -e > prompt_context.txt
 
   # 3. Aggressive codebase compression with exact roundtrip verification:
-  python3 cli.py -i ./src -o out --mode aggressive --verify-roundtrip
+  python3 chompress.py -i ./src -o out --mode aggressive --verify-roundtrip
 ------------------------------------------------------------------------------
 """
 
@@ -516,6 +516,7 @@ def main():
                 "enable_type_annotations_removal": args.strip_types,
                 "enable_ansi_stripping": args.strip_ansi,
                 "enable_badge_removal": args.strip_badges,
+                "tok": tok,
             }
             sig = inspect.signature(core.canonicalize_contents)
             if "enable_license_stripping" in sig.parameters:
