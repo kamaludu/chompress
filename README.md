@@ -90,7 +90,7 @@ Se la chat dell'AI si blocca perché il codice supera il limite di token consent
 ```sh
 python3 chompress.py -i codice_lungo.py --mode aggressive -e > prompt_minimo.txt
 ```
-* **Cosa fa**: Attiva tutte le ottimizzazioni di v3.5.0:
+* **Cosa fa**: Attiva tutte le ottimizzazioni di v1.0.0:
   - Rimozione licenze legali e boilerplate ripetitivi.
   - Stripping di commenti, docstring e annotazioni di tipo PEP 484/526.
   - Ridenominazione AST delle variabili locali in identificatori a 1 token (`a`, `b`, `c`...).
