@@ -211,7 +211,7 @@ Esegui tassativamente la procedura:
 3. Se l'hash coincide, conferma l'integrità, espandi i placeholder usando il dizionario e spiegami cosa fa questo modulo.
 ```
 
-*(Nota: puoi trovare i prompt completi già formulati per l'AI nel file* ***[PROMPT MASTER](PROMPT.md)*** *).*
+*(Nota: puoi trovare i prompt completi già formulati per l'AI nel file* ***[PROMPT MASTER](docs/PROMPT.md)*** *).*
 
 ---
 
@@ -278,7 +278,7 @@ Perché nei sistemi di tokenizzazione dei modelli moderni (BPE), questi simboli 
 ### Il programma è sicuro? Modifica file di sistema o esegue il codice?  
 **No.** `chompress` non usa la cartella globale `/tmp` di sistema, non esegue comandi dinamici (`eval` o `exec`), non richiede privilegi di amministratore e opera esclusivamente tramite analisi statica AST e algoritmi di hashing bufferizzati.
 
-Maggiori informazioni consulta: [SPECIFICA TECNICA DI SISTEMA](SPEC.md)
+Maggiori informazioni consulta: [SPECIFICA TECNICA DI SISTEMA](docs/SPEC.md)
 
 ---
 
@@ -311,4 +311,3 @@ Gli LLM sono stati utilizzati come strumenti di sviluppo, non come generatori au
 Il codice e la documentazione sono quindi il risultato di un processo iterativo e supervisionato, nel quale le proposte generate dagli LLM sono state valutate, confrontate, modificate o scartate dall'autore. Le decisioni finali e il risultato complessivo del progetto sono dell'autore.
 
 L'uso degli LLM offre significativi vantaggi in termini di produttività, analisi e revisione, ma introduce anche rischi: nessun processo di verifica può garantire che ogni errore o omissione venga individuato. Questa informativa intende rendere trasparente sia l'ampiezza dell'utilizzo degli LLM sia il loro ruolo effettivo nel processo di sviluppo.
-
