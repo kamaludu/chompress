@@ -2,9 +2,9 @@
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-green.svg)](LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](#)
 
-# Compressore di Contesto per AI (chunk-compress v3.4.1)
+# Compressore di Contesto per AI (chompress v3.4.1)
 
-**chunk-compress** è uno strumento leggero e trasparente che riduce le dimensioni di file sorgente, script e interi progetti software **prima di incollarli nella chat di un'intelligenza artificiale** (come ChatGPT, Claude, Copilot, DeepSeek o modelli locali).
+**chompress** è uno strumento leggero e trasparente che riduce le dimensioni di file sorgente, script e interi progetti software **prima di incollarli nella chat di un'intelligenza artificiale** (come ChatGPT, Claude, Copilot, DeepSeek o modelli locali).
 
 Sostituendo le porzioni duplicate con abbreviazioni ad altissima efficienza ed eliminando il testo superfluo, **ti permette di risparmiare dal 30% al 60% dei token** (lo spazio disponibile nella finestra della chat), consentendoti di inviare molto più codice in un singolo prompt senza perdere informazioni importanti.
 
@@ -110,12 +110,12 @@ python3 cli.py -i file_gigante.py -o out_spezzato --chunk-output --chunk-size 12
 ### 3.1 Cos'è un Chunk e Perché Serve?
 Le interfacce web delle intelligenze artificiali (come ChatGPT, Claude o Copilot) hanno spesso un **limite massimo di caratteri per singolo messaggio** (solitamente tra i 15.000 e i 30.000 caratteri). Se tenti di incollare un file enorme da 100.000 o 300.000 caratteri, la chat mostrerà un errore di testo troppo lungo oppure troncherà brutalmente il testo a metà.
 
-La funzione **Chunking** di `chunk-compress` risolve questo problema: prende il file compresso e lo taglia in frammenti ordinati e autosufficienti (`0001.txt`, `0002.txt`, ecc.), permettendoti di trasmetterli all'AI in sequenza controllata.
+La funzione **Chunking** di `chompress` risolve questo problema: prende il file compresso e lo taglia in frammenti ordinati e autosufficienti (`0001.txt`, `0002.txt`, ecc.), permettendoti di trasmetterli all'AI in sequenza controllata.
 
 ---
 
 ### 3.2 Le 3 Protezioni di Sicurezza dei Chunk
-A differenza di un comando generico come `split` di Linux, `chunk-compress` applica tre algoritmi di sicurezza:
+A differenza di un comando generico come `split` di Linux, `chompress` applica tre algoritmi di sicurezza:
 
 1. **Protezione Atomica (Boundary-Aware)**: Il compressore non taglia **MAI** a metà un'abbreviazione o un token di dizionario (come `^1` o `一`). Se il limite di caratteri cade nel mezzo di un token, il programma arretra istantaneamente all'inizio del token.
 2. **Taglio Pulito a Fine Riga (Newline Backtracking)**: Ogni frammento non si interrompe nel mezzo di un'istruzione di codice, ma arretra sempre all'ultimo ritorno a capo valido (`\n`). Ogni chunk contiene blocchi di codice completi.
@@ -215,7 +215,7 @@ Quando invii codice o documenti a un'intelligenza artificiale, paghi (o consumi 
 2. **Frasi o funzioni duplicate**: blocchi di codice, controlli di autorizzazione o percorsi web ripetuti ovunque.
 3. **Spaziature visive**: spazi e tabulazioni vuote che servono all'occhio umano ma sprecano memoria dell'AI.
 
-**chunk-compress** analizza il testo, compila un piccolo vocabolario di abbreviazioni (usando simboli speciali che l'AI comprende al volo come singoli caratteri) e sostituisce tutte le ripetizioni. 
+**chompress** analizza il testo, compila un piccolo vocabolario di abbreviazioni (usando simboli speciali che l'AI comprende al volo come singoli caratteri) e sostituisce tutte le ripetizioni. 
 
 ### Il Risparmio Netto Reale
 Il programma calcola il risparmio reale sottraendo anche lo spazio occupato dal vocabolario stesso:
@@ -255,7 +255,7 @@ Se il risultato è positivo, significa che stai risparmiando spazio reale ed eff
 Perché nei sistemi dei modelli AI (chiamati BPE tokenizers), questi simboli occupano **esattamente 1 o 2 token**, contro i 5 o 10 token che occuperebbero abbreviazioni come `__token_001__`. È proprio questo trucco che garantisce fino al 60% di risparmio reale!
 
 ### Serve installare librerie esterne?
-**No.** `chunk-compress` funziona immediatamente con la sola installazione base di Python (zero pacchetti esterni obbligatori).
+**No.** `chompress` funziona immediatamente con la sola installazione base di Python (zero pacchetti esterni obbligatori).
 
 ---
 
@@ -277,15 +277,14 @@ Per funzionare correttamente, la cartella deve contenere i seguenti file di prog
 * **Licenza:** GNU General Public License v3.0 ([LICENSE](LICENSE))
 * **Autore:** Cristian Evangelisti  
 * **Email:** `opensource@cevangel.anonaddy.me`  
-* **Repository:** [GitHub kamaludu/chunk-compress](https://github.com/kamaludu/chunk-compress)
+* **Repository:** [GitHub kamaludu/chompress](https://github.com/kamaludu/chompress)
 
 ### Uso di strumenti di Intelligenza Artificiale nello sviluppo
 
-**chunk-compress** è un'opera sviluppata dall'autore con un uso esteso di strumenti di Intelligenza Artificiale generativa (LLM) per progettazione, implementazione, analisi, debugging, revisione e documentazione.
+**chompress** è un'opera sviluppata dall'autore con un uso esteso di strumenti di Intelligenza Artificiale generativa (LLM) per progettazione, implementazione, analisi, debugging, revisione e documentazione.
 
 Gli LLM sono stati utilizzati come strumenti di sviluppo, non come generatori autonomi del progetto. L'autore ha definito l'architettura, i requisiti e le scelte progettuali, orchestrando il lavoro attraverso modelli e sessioni differenti e utilizzando gli stessi LLM anche per esaminare, mettere in discussione e criticare il lavoro prodotto da altri modelli.
 
 Il codice e la documentazione sono quindi il risultato di un processo iterativo e supervisionato, nel quale le proposte generate dagli LLM sono state valutate, confrontate, modificate o scartate dall'autore. Le decisioni finali e il risultato complessivo del progetto sono dell'autore.
 
 L'uso degli LLM offre significativi vantaggi in termini di produttività, analisi e revisione, ma introduce anche rischi: nessun processo di verifica può garantire che ogni errore o omissione venga individuato. Questa informativa intende rendere trasparente sia l'ampiezza dell'utilizzo degli LLM sia il loro ruolo effettivo nel processo di sviluppo.
-
