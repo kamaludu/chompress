@@ -5,7 +5,7 @@ File: minifiers.py (P1, P3 & P4 Semantic Canonicalization & Aggressive Compactor
 Copyright (C) 2026 Cristian Evangelisti
 License: GPL-3.0-or-later
 SPDX-License-Identifier: GPL-3.0-or-later
-Source: https://github.com/kamaludu/chunk-compress
+Source: https://github.com/kamaludu/chompress
 
 Description:
 Safe, language-aware semantic minifiers and aggressive LLM canonicalizers:
@@ -19,8 +19,14 @@ Safe, language-aware semantic minifiers and aggressive LLM canonicalizers:
     and leftover typing imports after type annotation removal.
   * P4.2 Assertions & Diagnostic Statement Pruning: Eliminates assert statements
     and diagnostic checks in aggressive LLM compression mode.
-  * Conservative local variable renaming (_v1, _v2) on safe scopes.
-  * Executable integrity verified via compile().
+  * CLI Narrative Stripping (Vector A): Strips documentation keywords ('help',
+    'description', 'epilog') from ArgumentParser and add_argument while strictly
+    preserving functional options (type, default, choices, action, formatter_class, etc.).
+  * Top-Level Private Symbol Renaming (Vector B): Renames module-level private functions
+    and variables (_foo -> _a, _b...) guarded by dynamic reflection detection.
+  * High-density 1-token BPE local variable renaming (a, b, c...) prioritizing
+    high-frequency identifiers and strictly preserving single-token names.
+  * Executable syntax integrity verified via compile().
 - Bash Canonicalizer (P1.1): Strips ANSI terminal escape codes, full-line comments,
   and collapses trailing whitespace runs.
 - Markdown Canonicalizer (P1.2): Strips shields.io/CI status badges and compacts table cell visual padding.
@@ -34,15 +40,27 @@ ROI_license_pct = ((tokens_license_saved) * 100.0) / (original_tokens)
 tokens_err_saved = sum(j=1 to m_exceptions, tokens(verbose_str_j) - tokens(short_id_j))
 tokens_import_saved = sum(k=1 to p_imports, tokens(unused_import_k))
 tokens_assert_saved = sum(q=1 to r_asserts, tokens(assert_stmt_q))
+tokens_rename_saved = sum(m=1 to s_locals, freq_m * (tokens(orig_name_m) - 1))
+tokens_priv_saved = sum(p=1 to t_privates, freq_p * (tokens(orig_priv_p) - tokens(new_priv_p)))
+tokens_cli_saved = sum(u=1 to v_cli, tokens(narrative_kwarg_u))
 net_tokens_saved = original_tokens - (compressed_payload_tokens + mapping_tokens + protocol_tokens)
 net_compression_ratio = ((net_tokens_saved) * 100.0) / (original_tokens)
 """
 
 import ast
+import builtins
 import json
+import keyword
 from pathlib import Path
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+
+import tokenizer
+
+# Reserved keywords and built-in identifiers to protect from local shadowing
+PYTHON_RESERVED: Set[str] = set(keyword.kwlist) | set(dir(builtins))
+if hasattr(keyword, "softkwlist"):
+    PYTHON_RESERVED.update(keyword.softkwlist)
 
 
 # ==============================================================================
@@ -432,6 +450,42 @@ class _AssertPruner(ast.NodeTransformer):
         return None
 
 
+class _ArgparseNarrativeStripper(ast.NodeTransformer):
+    """
+    Vector A: CLI Narrative Stripper with Strict Whitelist.
+    Strips only narrative human documentation keywords ('help', 'description', 'epilog')
+    from ArgumentParser constructors and add_argument / add_parser method calls.
+    Preserves all functional configuration keywords:
+    prog, usage, type, default, choices, action, required, formatter_class,
+    parents, conflict_handler, add_help, allow_abbrev, etc.
+    """
+
+    NARRATIVE_KWARGS: Set[str] = {"help", "description", "epilog"}
+    TARGET_METHODS: Set[str] = {
+        "add_argument",
+        "add_parser",
+        "add_argument_group",
+        "add_mutually_exclusive_group",
+    }
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        self.generic_visit(node)
+        is_target = False
+
+        if isinstance(node.func, ast.Name) and "ArgumentParser" in node.func.id:
+            is_target = True
+        elif isinstance(node.func, ast.Attribute):
+            if node.func.attr in self.TARGET_METHODS or "ArgumentParser" in node.func.attr:
+                is_target = True
+
+        if is_target and node.keywords:
+            node.keywords = [
+                kw for kw in node.keywords if kw.arg not in self.NARRATIVE_KWARGS
+            ]
+
+        return node
+
+
 class _UsedNamesCollector(ast.NodeVisitor):
     """
     Collects all identifiers actually referenced (loaded) across the AST.
@@ -521,38 +575,261 @@ class _EmptyBodyFixer(ast.NodeTransformer):
         return node
 
 
+def _generate_candidate_identifiers() -> Iterator[str]:
+    """
+    Generates ultra-compact candidate identifiers for local variables:
+    - Tier 1: Single lowercase letters 'a' through 'z' (strictly 1 token in BPE).
+    - Tier 2: Two-letter lowercase pairs 'aa' through 'zz' (for rare scopes exceeding 26 variables).
+    """
+    letters = "abcdefghijklmnopqrstuvwxyz"
+    for ch in letters:
+        yield ch
+    for c1 in letters:
+        for c2 in letters:
+            yield f"{c1}{c2}"
+
+
+def _generate_private_identifiers() -> Iterator[str]:
+    """
+    Generates compact private candidate identifiers for top-level symbols (Vector B):
+    - Tier 1: '_a' through '_z' (strictly saves tokens on multi-token names).
+    - Tier 2: '_aa' through '_zz'.
+    """
+    letters = "abcdefghijklmnopqrstuvwxyz"
+    for ch in letters:
+        yield f"_{ch}"
+    for c1 in letters:
+        for c2 in letters:
+            yield f"_{c1}{c2}"
+
+
+class _ModuleScopeAnalyzer(ast.NodeVisitor):
+    """
+    Vector B: Module-Level Scope Analyzer for Private Top-Level Symbols.
+    - Scans the entire module AST for dynamic reflection or introspection (eval, exec,
+      locals, globals, getattr, setattr, hasattr, vars, dir, __dict__).
+    - Identifies module-level private functions and variables starting with a single '_'.
+    - Excludes public API symbols, dunder names, names exported in __all__, and imported aliases.
+    - Excludes private symbols that are shadowed as inner function parameters or local variables.
+    """
+
+    DANGEROUS_CALLS = {
+        "eval", "exec", "locals", "globals", "getattr", "setattr", "hasattr", "vars", "dir"
+    }
+
+    def __init__(self, tree: ast.Module, tok: Optional[tokenizer.BaseTokenizer] = None):
+        self.tree = tree
+        self.tok = tok or tokenizer.get_tokenizer("heuristic")
+        self.is_safe = True
+        self.all_names: Set[str] = set()
+        self.name_counts: Dict[str, int] = {}
+        self.top_level_private_defs: Dict[str, ast.AST] = {}
+        self.imported_names: Set[str] = set()
+        self.exported_all_names: Set[str] = set()
+        self.inner_shadowed_names: Set[str] = set()
+
+        for stmt in tree.body:
+            if isinstance(stmt, (ast.FunctionDef, getattr(ast, "AsyncFunctionDef", ()))):
+                name = stmt.name
+                if name.startswith("_") and not name.startswith("__") and len(name) > 1:
+                    self.top_level_private_defs[name] = stmt
+            elif isinstance(stmt, ast.Assign):
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name):
+                        if target.id == "__all__" and isinstance(stmt.value, (ast.List, ast.Tuple, ast.Set)):
+                            for elt in stmt.value.elts:
+                                if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                                    self.exported_all_names.add(elt.value)
+                        elif target.id.startswith("_") and not target.id.startswith("__") and len(target.id) > 1:
+                            self.top_level_private_defs[target.id] = stmt
+            elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+                t_name = stmt.target.id
+                if t_name.startswith("_") and not t_name.startswith("__") and len(t_name) > 1:
+                    self.top_level_private_defs[t_name] = stmt
+            elif isinstance(stmt, ast.Import):
+                for alias in stmt.names:
+                    self.imported_names.add(alias.asname or alias.name.split(".")[0])
+            elif isinstance(stmt, ast.ImportFrom):
+                for alias in stmt.names:
+                    self.imported_names.add(alias.asname or alias.name)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Name) and node.func.id in self.DANGEROUS_CALLS:
+            self.is_safe = False
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr == "__dict__":
+            self.is_safe = False
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        name_id = node.id
+        self.all_names.add(name_id)
+        self.name_counts[name_id] = self.name_counts.get(name_id, 0) + 1
+        self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        if node not in self.top_level_private_defs.values():
+            if node.args:
+                for arg in getattr(node.args, "posonlyargs", []):
+                    self.inner_shadowed_names.add(arg.arg)
+                for arg in node.args.args:
+                    self.inner_shadowed_names.add(arg.arg)
+                if node.args.vararg:
+                    self.inner_shadowed_names.add(node.args.vararg.arg)
+                if node.args.kwarg:
+                    self.inner_shadowed_names.add(node.args.kwarg.arg)
+                for arg in getattr(node.args, "kwonlyargs", []):
+                    self.inner_shadowed_names.add(arg.arg)
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        if node not in self.top_level_private_defs.values():
+            if node.args:
+                for arg in getattr(node.args, "posonlyargs", []):
+                    self.inner_shadowed_names.add(arg.arg)
+                for arg in node.args.args:
+                    self.inner_shadowed_names.add(arg.arg)
+                if node.args.vararg:
+                    self.inner_shadowed_names.add(node.args.vararg.arg)
+                if node.args.kwarg:
+                    self.inner_shadowed_names.add(node.args.kwarg.arg)
+                for arg in getattr(node.args, "kwonlyargs", []):
+                    self.inner_shadowed_names.add(arg.arg)
+        self.generic_visit(node)
+
+    def get_renamable_privates(self) -> Tuple[Dict[str, str], Set[ast.AST]]:
+        """
+        Returns (rename_map, target_definition_nodes).
+        Strictly requires tok.count(old_name) > tok.count(new_name).
+        Sorts descending by total net token gain: freq * (tok.count(old) - tok.count(new)).
+        """
+        if not self.is_safe:
+            return {}, set()
+
+        raw_candidates = set(self.top_level_private_defs.keys())
+        raw_candidates -= self.imported_names
+        raw_candidates -= self.exported_all_names
+        raw_candidates -= self.inner_shadowed_names
+        raw_candidates -= PYTHON_RESERVED
+
+        if not raw_candidates:
+            return {}, set()
+
+        # In BPE and HeuristicBackend, '_a' represents the minimum replacement cost
+        sample_target_tokens = self.tok.count("_a")
+
+        candidates: List[str] = []
+        for name in raw_candidates:
+            if self.tok.count(name) > sample_target_tokens:
+                candidates.append(name)
+
+        if not candidates:
+            return {}, set()
+
+        def sort_key(n: str) -> Tuple[int, int, str]:
+            freq = self.name_counts.get(n, 1)
+            token_cost = self.tok.count(n)
+            gain = freq * (token_cost - sample_target_tokens)
+            return (-gain, -len(n), n)
+
+        candidates.sort(key=sort_key)
+
+        unavailable = set(self.all_names)
+        unavailable.update(PYTHON_RESERVED)
+
+        rename_map: Dict[str, str] = {}
+        target_nodes: Set[ast.AST] = set()
+        gen = _generate_private_identifiers()
+
+        for name in candidates:
+            for short_id in gen:
+                if short_id not in unavailable:
+                    rename_map[name] = short_id
+                    unavailable.add(short_id)
+                    target_nodes.add(self.top_level_private_defs[name])
+                    break
+
+        return rename_map, target_nodes
+
+
+class _ModulePrivateRenamer(ast.NodeTransformer):
+    """
+    Substitutes module-level private identifiers with compact replacements across AST.
+    Only modifies top-level function names if they were explicitly registered.
+    """
+
+    def __init__(self, rename_map: Dict[str, str], target_nodes: Set[ast.AST]):
+        self.rename_map = rename_map
+        self.target_nodes = target_nodes
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        if node in self.target_nodes and node.name in self.rename_map:
+            node.name = self.rename_map[node.name]
+        self.generic_visit(node)
+        return node
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
+        if node in self.target_nodes and node.name in self.rename_map:
+            node.name = self.rename_map[node.name]
+        self.generic_visit(node)
+        return node
+
+    def visit_Name(self, node: ast.Name) -> ast.AST:
+        if node.id in self.rename_map:
+            return ast.copy_location(
+                ast.Name(id=self.rename_map[node.id], ctx=node.ctx), node
+            )
+        return node
+
+
 class _LocalScopeAnalyzer(ast.NodeVisitor):
     """
     Analyzes a FunctionDef node to determine if local variable renaming is safe:
     - Bails out if dynamic reflection is detected (eval, exec, locals, globals,
       getattr, setattr, hasattr, vars).
-    - Excludes argument names, imported aliases, globals, nonlocals, and dunder names.
-    - Identifies strictly local variables that never escape to global or closure scope.
+    - Excludes parameter names, imported aliases, globals, nonlocals, and dunder names.
+    - Excludes identifiers already referenced in nested functions/classes (closure protection).
+    - Excludes single-token variables to prevent churn and token inflation.
+    - Generates strictly 1-token replacement identifiers without shadowing.
     """
 
     DANGEROUS_CALLS = {
         "eval", "exec", "locals", "globals", "getattr", "setattr", "hasattr", "vars"
     }
 
-    def __init__(self, func_node: ast.AST):
+    def __init__(
+        self,
+        func_node: ast.AST,
+        tok: Optional[tokenizer.BaseTokenizer] = None,
+    ):
         self.func_node = func_node
+        self.tok = tok or tokenizer.get_tokenizer("heuristic")
         self.is_safe = True
         self.stored_names: Set[str] = set()
         self.loaded_names: Set[str] = set()
         self.excluded_names: Set[str] = set()
+        self.all_scope_names: Set[str] = set()
+        self.name_counts: Dict[str, int] = {}
 
         args_node = getattr(func_node, "args", None)
         if args_node:
             for arg in getattr(args_node, "posonlyargs", []):
                 self.excluded_names.add(arg.arg)
+                self.all_scope_names.add(arg.arg)
             for arg in args_node.args:
                 self.excluded_names.add(arg.arg)
+                self.all_scope_names.add(arg.arg)
             if args_node.vararg:
                 self.excluded_names.add(args_node.vararg.arg)
+                self.all_scope_names.add(args_node.vararg.arg)
             if args_node.kwarg:
                 self.excluded_names.add(args_node.kwarg.arg)
+                self.all_scope_names.add(args_node.kwarg.arg)
             for arg in getattr(args_node, "kwonlyargs", []):
                 self.excluded_names.add(arg.arg)
+                self.all_scope_names.add(arg.arg)
 
     def visit_Call(self, node: ast.Call) -> None:
         if isinstance(node.func, ast.Name) and node.func.id in self.DANGEROUS_CALLS:
@@ -562,62 +839,125 @@ class _LocalScopeAnalyzer(ast.NodeVisitor):
     def visit_Global(self, node: ast.Global) -> None:
         for name in node.names:
             self.excluded_names.add(name)
+            self.all_scope_names.add(name)
 
     def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
         for name in node.names:
             self.excluded_names.add(name)
+            self.all_scope_names.add(name)
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
-            self.excluded_names.add(alias.asname or alias.name)
+            bound = alias.asname or alias.name.split(".")[0]
+            self.excluded_names.add(bound)
+            self.all_scope_names.add(bound)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         for alias in node.names:
-            self.excluded_names.add(alias.asname or alias.name)
+            bound = alias.asname or alias.name
+            self.excluded_names.add(bound)
+            self.all_scope_names.add(bound)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         if node is not self.func_node:
             self.excluded_names.add(node.name)
+            self.all_scope_names.add(node.name)
+            # Protect closure: exclude any name used in nested functions
+            for child in ast.walk(node):
+                if isinstance(child, ast.Name):
+                    self.excluded_names.add(child.id)
+                    self.all_scope_names.add(child.id)
+            return
         self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         if node is not self.func_node:
             self.excluded_names.add(node.name)
+            self.all_scope_names.add(node.name)
+            for child in ast.walk(node):
+                if isinstance(child, ast.Name):
+                    self.excluded_names.add(child.id)
+                    self.all_scope_names.add(child.id)
+            return
         self.generic_visit(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.excluded_names.add(node.name)
-        self.generic_visit(node)
+        self.all_scope_names.add(node.name)
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name):
+                self.excluded_names.add(child.id)
+                self.all_scope_names.add(child.id)
 
     def visit_Name(self, node: ast.Name) -> None:
-        if node.id.startswith("__") and node.id.endswith("__"):
-            self.excluded_names.add(node.id)
+        name_id = node.id
+        self.all_scope_names.add(name_id)
+        self.name_counts[name_id] = self.name_counts.get(name_id, 0) + 1
+
+        if name_id.startswith("__") and name_id.endswith("__"):
+            self.excluded_names.add(name_id)
             return
 
         if isinstance(node.ctx, ast.Store):
-            self.stored_names.add(node.id)
+            self.stored_names.add(name_id)
         elif isinstance(node.ctx, ast.Load):
-            self.loaded_names.add(node.id)
+            self.loaded_names.add(name_id)
 
     def get_renamable_locals(self) -> Dict[str, str]:
-        """Returns mapping from old_name -> short_name if safe, else empty dict."""
+        """
+        Returns mapping from old_name -> 1-token short_name.
+        Strictly excludes variables that already occupy 1 token to prevent token inflation.
+        Sorts candidates descending by net token gain: freq * (tok_count(name) - 1).
+        """
         if not self.is_safe:
             return {}
 
-        candidates = self.stored_names - self.excluded_names
+        raw_candidates = self.stored_names - self.excluded_names
+        if not raw_candidates:
+            return {}
+
+        # Strictly filter candidates: only rename if original identifier takes > 1 token
+        candidates: List[str] = []
+        for name in raw_candidates:
+            if len(name) <= 1:
+                continue
+            if self.tok.count(name) > 1:
+                candidates.append(name)
+
+        if not candidates:
+            return {}
+
+        # Sort descending by net token gain potential
+        def sort_key(n: str) -> Tuple[int, int, str]:
+            freq = self.name_counts.get(n, 1)
+            token_cost = self.tok.count(n)
+            gain = freq * (token_cost - 1)
+            return (-gain, -len(n), n)
+
+        candidates.sort(key=sort_key)
+
+        # Names unavailable for replacement to avoid shadowing any existing identifier
+        unavailable = set(self.all_scope_names)
+        unavailable.update(PYTHON_RESERVED)
+
         renamable: Dict[str, str] = {}
-        counter = 1
-        for name in sorted(candidates):
-            if len(name) > 3:
-                short_id = f"_v{counter}"
-                renamable[name] = short_id
-                counter += 1
+        gen = _generate_candidate_identifiers()
+
+        for name in candidates:
+            for short_id in gen:
+                if short_id not in unavailable:
+                    renamable[name] = short_id
+                    unavailable.add(short_id)
+                    break
 
         return renamable
 
 
 class _LocalRenamer(ast.NodeTransformer):
-    """Applies local variable renaming to a function AST node."""
+    """
+    Applies local variable renaming to a function AST node.
+    Does not descend into nested functions or classes to preserve closure isolation.
+    """
 
     def __init__(self, rename_map: Dict[str, str]):
         self.rename_map = rename_map
@@ -629,6 +969,15 @@ class _LocalRenamer(ast.NodeTransformer):
             )
         return node
 
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        return node
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
+        return node
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> ast.AST:
+        return node
+
 
 def minify_python(
     code: str,
@@ -638,6 +987,9 @@ def minify_python(
     compact_error_strings: bool = True,
     prune_imports: bool = True,
     prune_asserts: bool = True,
+    strip_argparse_narratives: bool = True,
+    rename_private_symbols: bool = True,
+    tok: Optional[tokenizer.BaseTokenizer] = None,
 ) -> str:
     """
     Conservative & Aggressive Python AST minifier (P1, P3, P4):
@@ -646,8 +998,12 @@ def minify_python(
     - Strips PEP 484/526 type annotations when strip_types is True.
     - Compacts verbose exception and logger strings when compact_error_strings is True (P3.2).
     - Prunes diagnostic assert statements when prune_asserts is True (P4.2).
+    - Strips CLI narrative kwargs (help, description, epilog) via strict whitelist when
+      strip_argparse_narratives is True (Vector A).
+    - Renames top-level private symbols (_foo -> _a, _b...) guarded by dynamic reflection
+      detection when rename_private_symbols is True (Vector B).
     - Prunes unused imports and dead typing modules when prune_imports is True (P4.1).
-    - Performs safe local-only variable renaming when rename_locals is True.
+    - Performs high-density 1-token local variable renaming when rename_locals is True.
     - Preserves syntactic validity across empty blocks via _EmptyBodyFixer.
     - Unparses AST back to valid Python code.
     - Verifies executable equivalence via compile().
@@ -657,6 +1013,8 @@ def minify_python(
         tree = ast.parse(code)
     except SyntaxError:
         return code
+
+    active_tok = tok or tokenizer.get_tokenizer("heuristic")
 
     try:
         if strip_docstrings:
@@ -671,15 +1029,27 @@ def minify_python(
         if prune_asserts:
             tree = _AssertPruner().visit(tree)
 
+        if strip_argparse_narratives:
+            tree = _ArgparseNarrativeStripper().visit(tree)
+
         if prune_imports:
             collector = _UsedNamesCollector()
             collector.visit(tree)
             tree = _UnusedImportPruner(collector.used_names).visit(tree)
 
+        # Vector B: Top-level private symbol renaming
+        if rename_private_symbols and isinstance(tree, ast.Module):
+            mod_analyzer = _ModuleScopeAnalyzer(tree, tok=active_tok)
+            mod_analyzer.visit(tree)
+            mod_rename_map, target_nodes = mod_analyzer.get_renamable_privates()
+            if mod_rename_map:
+                tree = _ModulePrivateRenamer(mod_rename_map, target_nodes).visit(tree)
+
+        # Local variable renaming
         if rename_locals:
             for node in ast.walk(tree):
                 if isinstance(node, (ast.FunctionDef, getattr(ast, "AsyncFunctionDef", ()))):
-                    analyzer = _LocalScopeAnalyzer(node)
+                    analyzer = _LocalScopeAnalyzer(node, tok=active_tok)
                     analyzer.visit(node)
                     mapping = analyzer.get_renamable_locals()
                     if mapping:
@@ -766,12 +1136,16 @@ def canonicalize_content(
     enable_error_string_compaction: bool = True,
     enable_import_pruning: bool = True,
     enable_assert_pruning: bool = True,
+    enable_argparse_stripping: bool = True,
+    enable_private_renaming: bool = True,
+    tok: Optional[tokenizer.BaseTokenizer] = None,
     **kwargs: Any,
 ) -> str:
     """
     Dispatches content to the appropriate safe minifier based on file extension.
     Applies P3.1 license header stripping, P3.2 error compaction, P3.4 config minification,
-    P4.1 unused import pruning, and P4.2 assertion pruning.
+    P4.1 unused import pruning, P4.2 assertion pruning, Vector A CLI narrative stripping,
+    and Vector B private top-level symbol renaming.
     """
     p = Path(file_path)
     ext = p.suffix.lower()
@@ -809,6 +1183,9 @@ def canonicalize_content(
             compact_error_strings=enable_error_string_compaction,
             prune_imports=enable_import_pruning,
             prune_asserts=enable_assert_pruning,
+            strip_argparse_narratives=enable_argparse_stripping,
+            rename_private_symbols=enable_private_renaming,
+            tok=tok,
         )
 
     # JSON configuration (P3.4)
