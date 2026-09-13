@@ -1,7 +1,9 @@
+[![Chompress](https://img.shields.io/badge/Chompress-00aa55?style=for-the-badge&label=><&labelColor=004d00)](README.md)
 
-[![Chompress](https://img.shields.io/badge/Chompress-00aa55?style=for-the-badge&label=>&labelColor=004d00)](README.md)
+# GUIDA - AI PROMPT MASTER
 
-# GUIDA - AI PROMPT MASTER (v3.5.0)
+***version 3.5.0***  
+
 *(Ottimizzato per modelli di ragionamento avanzato: OpenAI o1/o3/GPT-4o, Anthropic Claude 3.5/3.7 Sonnet, Copilot Think Deeper, DeepSeek R1)*
 
 Questa guida definisce i protocolli di comunicazione tra l'utente e il Large Language Model per l'ingestione, la decompressione in memoria e l'analisi del contesto compresso generato da **chompress**.
