@@ -1,0 +1,21 @@
+# Byte-compiled / cache Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Cartelle e file temporanei di test di chompress
+.test_tmp/
+test_input/
+test_output*/
+test_stdout*.txt
+test_pipe.txt
+
+# Output generati dagli utenti
+compressed_output/
+prompt*.txt
+
+# OS e ambienti
+.DS_Store
+.venv/
+venv/
