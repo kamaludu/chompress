@@ -1,4 +1,4 @@
-[![Chompress](https://img.shields.io/badge/Chompress-00aa55?style=for-the-badge&label=><&labelColor=004d00)](README.md)
+[![Chompress](https://img.shields.io/badge/Chompress-00aa55?style=for-the-badge&label=><&labelColor=004d00)](../README.md)
 
 # GUIDA - AI PROMPT MASTER
 
