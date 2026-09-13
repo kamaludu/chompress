@@ -3,7 +3,7 @@
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](#)
 
 # Chompress: Compressore di Contesto per AI
-***version 3.5.0***
+***version 1.0.0***
 
 **chompress** è uno strumento leggero e trasparente che riduce drasticamente le dimensioni di file sorgente, script e interi progetti software **prima di incollarli nella chat di un'intelligenza artificiale** (come ChatGPT, Claude, Copilot, DeepSeek o modelli locali).
 
@@ -90,7 +90,7 @@ Se la chat dell'AI si blocca perché il codice supera il limite di token consent
 ```sh
 python3 chompress.py -i codice_lungo.py --mode aggressive -e > prompt_minimo.txt
 ```
-* **Cosa fa**: Attiva tutte le ottimizzazioni di v3.5.0:
+* **Cosa fa**: Attiva tutte le ottimizzazioni di v1.0.0:
   - Rimozione licenze legali e boilerplate ripetitivi.
   - Stripping di commenti, docstring e annotazioni di tipo PEP 484/526.
   - Ridenominazione AST delle variabili locali in identificatori a 1 token (`a`, `b`, `c`...).

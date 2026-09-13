@@ -46,11 +46,11 @@ import minifiers
 import placeholders as ph_module
 import tokenizer
 
-VERSION = "3.5.0"
+VERSION = "1.0.0"
 
 ENVELOPE_HEADER = (
     "<context>\n"
-    "[LLM-READY COMPRESSED CONTEXT - chompress v3.5.0]\n"
+    "[LLM-READY COMPRESSED CONTEXT - chompress v1.0.0]\n"
     "[INSTRUCTION: Expand placeholders using mapping dictionary before execution or analysis.]\n"
 )
 ENVELOPE_FOOTER = "</context>\n"

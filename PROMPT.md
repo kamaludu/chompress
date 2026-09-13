@@ -2,7 +2,7 @@
 
 # GUIDA - AI PROMPT MASTER
 
-***version 3.5.0***  
+***version 1.0.0***  
 
 *(Ottimizzato per modelli di ragionamento avanzato: OpenAI o1/o3/GPT-4o, Anthropic Claude 3.5/3.7 Sonnet, Copilot Think Deeper, DeepSeek R1)*
 
