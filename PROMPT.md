@@ -3,7 +3,7 @@
 # GUIDA AI PROMPT MASTER (v3.4.0)
 *(Ottimizzato per modelli di ragionamento avanzato: OpenAI o1/o3/GPT-4o, Anthropic Claude 3.5/3.7 Sonnet, Copilot Think Deeper, DeepSeek R1)*
 
-Questa guida definisce i protocolli di comunicazione tra l'utente e il Large Language Model per l'ingestione, la decompressione in memoria e l'analisi del contesto compresso generato da **chunk-compress**.
+Questa guida definisce i protocolli di comunicazione tra l'utente e il Large Language Model per l'ingestione, la decompressione in memoria e l'analisi del contesto compresso generato da **chompress**.
 
 ---
 
@@ -98,7 +98,7 @@ Istruzioni:
 *(Supporta sia il nuovo Positional Mapping a zero chiavi sia il formato JSON legacy)*
 
 ```text
-Questo è il dizionario di mappatura dei placeholder generato da chunk-compress.
+Questo è il dizionario di mappatura dei placeholder generato da chompress.
 
 Se l'intestazione inizia con [MAP:INDEXED...], interpretalo come mapping posizionale ordinale:
 - L'header indica la regola di generazione dei token (es. caratteri CJK contigui cjk_start=19968 count=N, prefissi numerici prefix='^', o intervalli multipli cjk_ranges).
@@ -176,7 +176,7 @@ Da utilizzare quando i file sorgente superano la dimensione del prompt o il limi
 
 ### Stadio 2.1: Apertura Sessione Chunking
 ```text
-Sto per fornirti un file di grandi dimensioni suddiviso in frammenti ordinati (chunk) tramite chunk-compress.
+Sto per fornirti un file di grandi dimensioni suddiviso in frammenti ordinati (chunk) tramite chompress.
 
 Riceverai in sequenza:
 1) Il file descrittore: chunks/manifest.json
@@ -278,12 +278,11 @@ Ora che i file sono stati verificati e decompressi con successo, procedi con l'e
 ```
 
 ---
----
 
 ## Note Tecniche per l'Utente Operatore
 
 1. **Garanzia Boundary-Aware a Monte**:  
-   I chunk creati da `chunk-compress` non tagliano mai a metà i simboli di placeholder (`一`, `^1`, `«1»`, ecc.) e arretrano sempre al delimitatore di riga `\n` più vicino. Ciascun chunk termina sempre con istruzioni sintatticamente integre.
+   I chunk creati da `chompress` non tagliano mai a metà i simboli di placeholder (`一`, `^1`, `«1»`, ecc.) e arretrano sempre al delimitatore di riga `\n` più vicino. Ciascun chunk termina sempre con istruzioni sintatticamente integre.
 2. **Ruolo Chiave di `sha256_full`**:  
    Verificare `sha256_full` prima di decodificare i placeholder permette di isolare immediatamente eventuali troncamenti o alterazioni introdotte dall'interfaccia di chat durante il copia-incolla, evitando di sprecare token in analisi su codice parziale.
 3. **Formule di Risparmio di Riferimento (ASCII Pura)**:
