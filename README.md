@@ -281,7 +281,7 @@ Per funzionare correttamente, la cartella deve contenere i seguenti file di prog
 
 ### Uso di strumenti di Intelligenza Artificiale nello sviluppo
 
-chunk-compress è un'opera sviluppata dall'autore con un uso esteso di strumenti di Intelligenza Artificiale generativa (LLM) per progettazione, implementazione, analisi, debugging, revisione e documentazione.
+**chunk-compress** è un'opera sviluppata dall'autore con un uso esteso di strumenti di Intelligenza Artificiale generativa (LLM) per progettazione, implementazione, analisi, debugging, revisione e documentazione.
 
 Gli LLM sono stati utilizzati come strumenti di sviluppo, non come generatori autonomi del progetto. L'autore ha definito l'architettura, i requisiti e le scelte progettuali, orchestrando il lavoro attraverso modelli e sessioni differenti e utilizzando gli stessi LLM anche per esaminare, mettere in discussione e criticare il lavoro prodotto da altri modelli.
 
