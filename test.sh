@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # File: test.sh
-# Description: End-to-end integration and smoke-test harness for chunk-compress.
+# Description: End-to-end integration and smoke-test harness for chompress.
 # Enforces POSIX line endings (\n) to prevent shell carriage return errors (P0.1).
 # Verifies P0 token economy, P1 domain minifiers, P2 BPE/Multi-Range,
 # P3 license/error compaction, polyglot configs, P3.3 stdout/pipe streaming,
@@ -75,7 +75,7 @@ ls -lh test_input/nested/
 
 echo ""
 echo "=== 2. AGGRESSIVE MODE + P1-P4 CANONICALIZATION + DEDUPLICATION ==="
-python3 cli.py -i test_input -o test_output --mode aggressive --verify-roundtrip --export-manifest
+python3 chompress.py -i test_input -o test_output --mode aggressive --verify-roundtrip --export-manifest
 
 # Verify directory structure was preserved
 if [ ! -f "test_output/nested/module.py" ]; then
@@ -137,7 +137,7 @@ fi
 
 echo ""
 echo "=== 3. SINGLE-FILE FIRST DIRECT COMPRESSION WORKFLOW ==="
-python3 cli.py -i test_input/service_a.py -o test_output_single --mode aggressive --verify-roundtrip
+python3 chompress.py -i test_input/service_a.py -o test_output_single --mode aggressive --verify-roundtrip
 if [ ! -f "test_output_single/service_a.py" ]; then
     echo "ERROR: Single file direct output missing in test_output_single/service_a.py" >&2
     exit 1
@@ -145,7 +145,7 @@ fi
 
 echo ""
 echo "=== 4. P3.3 & P4.3 DIRECT LLM CONTEXT STREAMING (--stdout, --envelope AND STDIN PIPE) ==="
-python3 cli.py -i test_input/service_a.py --stdout > test_stdout.txt
+python3 chompress.py -i test_input/service_a.py --stdout > test_stdout.txt
 if [ ! -s "test_stdout.txt" ]; then
     echo "ERROR: --stdout produced an empty stream" >&2
     exit 1
@@ -156,7 +156,7 @@ if ! grep -q "\[MAP:" test_stdout.txt; then
 fi
 
 # Test P4.3 LLM Prompt Envelope wrapping
-python3 cli.py -i test_input/service_a.py --stdout --envelope > test_stdout_envelope.txt
+python3 chompress.py -i test_input/service_a.py --stdout --envelope > test_stdout_envelope.txt
 if ! grep -q "<context>" test_stdout_envelope.txt; then
     echo "ERROR: Prompt envelope <context> tag missing in test_stdout_envelope.txt" >&2
     exit 1
@@ -171,7 +171,7 @@ if ! grep -q "\[LLM-READY COMPRESSED CONTEXT" test_stdout_envelope.txt; then
 fi
 
 # Test UNIX stdin pipe
-cat test_input/service_a.py | python3 cli.py -i - --stdout > test_pipe.txt
+cat test_input/service_a.py | python3 chompress.py -i - --stdout > test_pipe.txt
 if [ ! -s "test_pipe.txt" ]; then
     echo "ERROR: Stdin pipe produced an empty stream" >&2
     exit 1
@@ -181,11 +181,11 @@ echo "P3.3 and P4.3 direct context stream verified successfully (envelope stream
 
 echo ""
 echo "=== 5. PURE LOSSLESS MODE (--mode lossless) ==="
-python3 cli.py -i test_input -o test_output_lossless --mode lossless --verify-roundtrip
+python3 chompress.py -i test_input -o test_output_lossless --mode lossless --verify-roundtrip
 
 echo ""
 echo "=== 6. BOUNDARY-AWARE ATOMIC CHUNKING (P0.2) ==="
-python3 cli.py -i test_input -o test_output_chunks --chunk-output --chunk-size 2048 --verify-roundtrip
+python3 chompress.py -i test_input -o test_output_chunks --chunk-output --chunk-size 2048 --verify-roundtrip
 
 echo ""
 echo "Inspecting generated chunks directory:"
