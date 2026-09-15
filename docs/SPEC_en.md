@@ -11,9 +11,13 @@
 ```text
 chompress/             # Project Structure
 ├── LICENSE            # GNU General Public License v3.0
-├── PROMPT.md          # AI Prompt Master
 ├── README.md          # User Guide & Documentation
-├── SPEC.md            # System Technical Specification
+├── README_en.md
+├── docs
+│   ├── PROMPT.md      # AI Prompt Master 
+│   ├── PROMPT_en.md 
+│   ├── SPEC.md        # System Technical Specification
+│   └── SPEC_en.md 
 ├── benchmark.py       # P0 & Alphabet Optimizer Evaluation Harness
 ├── chompress.py       # Token-Aware CLI Orchestrator
 ├── core.py            # Token-Aware Core Pipeline
